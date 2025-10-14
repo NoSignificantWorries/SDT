@@ -325,11 +325,11 @@ if MAKE_16x16:
 
 # #%%
 
-def bootstrap_roc_parallel(X, y, model, n_bootstraps=1000, n_jobs=-1):
+def bootstrap_roc(X, y, model, n_bootstraps=1000, n_jobs=-1):
     n_jobs = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
     print(f"Запуск бутстрапа на {n_jobs} ядрах...")
     
-    def single_bootstrap(i):
+    for i in range(n_bootstraps):
         X_boot, y_boot = resample(X, y, random_state=i)
         model_boot = model
         model_boot.fit(X_boot, y_boot)
@@ -350,12 +350,6 @@ def bootstrap_roc_parallel(X, y, model, n_bootstraps=1000, n_jobs=-1):
         
         return tpr_interp, precision_interp, auc_boot, auprc_boot
     
-    # Параллельный запуск
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(single_bootstrap)(i) for i in range(n_bootstraps)
-    )
-    
-    # Разделение результатов
     tpr_bootstraps, precision_bootstraps, auc_bootstraps, auprc_bootstraps = zip(*results)
     
     return np.array(tpr_bootstraps), np.array(precision_bootstraps), \
@@ -363,9 +357,6 @@ def bootstrap_roc_parallel(X, y, model, n_bootstraps=1000, n_jobs=-1):
 
 
 def bootstrap_roc_pr_curves(X, y, model, n_bootstraps=1000, alpha=0.05, n_jobs=-1):
-    """
-    Строит ROC и PR кривые с доверительными полосами
-    """
     # Основная модель
     model_main = model
     model_main.fit(X, y)
@@ -379,7 +370,7 @@ def bootstrap_roc_pr_curves(X, y, model, n_bootstraps=1000, alpha=0.05, n_jobs=-
     
     # Параллельный бутстрап
     tpr_bootstraps, precision_bootstraps, auc_bootstraps, auprc_bootstraps = \
-        bootstrap_roc_parallel(X, y, model, n_bootstraps, n_jobs)
+        bootstrap_roc(X, y, model, n_bootstraps, n_jobs)
     
     # Общие оси для интерполяции
     base_fpr = np.linspace(0, 1, 101)
