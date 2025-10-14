@@ -1,10 +1,10 @@
-# %% [markdown]
+# #%% [markdown]
 # # **Task1**
 
-# %% [markdown]
+# #%% [markdown]
 # ### **Stage -1:** _Importing libs_
 
-# %%
+# #%%
 from typing import Optional, Tuple, Any
 
 import numpy as np
@@ -16,13 +16,13 @@ import scipy
 import seaborn as sns
 import statsmodels.api as sm
 
-# %% [markdown]
+# #%% [markdown]
 # ### **Stage 0:** _Master-classes for data and graph processing_
 
-# %% [markdown]
+# #%% [markdown]
 # ##### **_Plotter_**
 
-# %%
+# #%%
 class Plotter:
     def __init__(self, nrows: int = 1, ncols: int = 1, figsize: Tuple[int, int] = (6, 6)) -> None:
         self.fig, self.axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
@@ -170,10 +170,10 @@ class Plotter:
         self.fig.show()
 
 
-# %% [markdown]
+# #%% [markdown]
 # ##### **_Data processor_**
 
-# %%
+# #%%
 class MainFrame:
     def __init__(self) -> None:
         self.iris = sns.load_dataset("iris")
@@ -223,10 +223,10 @@ class MainFrame:
         ...
 
 
-# %% [markdown]
+# #%% [markdown]
 # ### **Stage1** (tasks [1] [2]): _Loading data_
 
-# %%
+# #%%
 # step1
 main = MainFrame()
 
@@ -250,13 +250,13 @@ if null_values_count > 0:
 # step3
 main.main_loop()
 
-# %% [markdown]
+# #%% [markdown]
 # ### **Stage 2** (task [3]): _Simple params visualization_
 
-# %% [markdown]
+# #%% [markdown]
 # ##### **_Data scatters_**
 
-# %%
+# #%%
 # step4
 plotter = Plotter(4, 4, (24, 24))
 
@@ -279,10 +279,10 @@ for i in range(len(main.data)):
 plotter.tight_layout()
 plotter.save("res/scatters1.png", dpi=200)
 
-# %% [markdown]
+# #%% [markdown]
 # ##### **_Param hists_**
 
-# %%
+# #%%
 # step5
 plotter = Plotter(2, 2, (18, 10))
 
@@ -296,10 +296,10 @@ for j, param in enumerate(main.params):
 plotter.save("res/hists.png", dpi=200)
 plotter.tight_layout()
 
-# %% [markdown]
+# #%% [markdown]
 # ### **Stage 3** (task [4]): _Correlation matrixes_
 
-# %%
+# #%%
 
 all_data = []
 groups = []
@@ -329,7 +329,7 @@ for k in range(main.classes_count + 1):
     all_data.append(data)
 
 
-# %%
+# #%%
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
@@ -338,19 +338,19 @@ pd.set_option('display.max_colwidth', None)
 print(f"Stats for {groups[0]}")
 all_data[0]
 
-# %%
+# #%%
 print(f"Stats for {groups[1]}")
 all_data[1]
 
-# %%
+# #%%
 print(f"Stats for {groups[2]}")
 all_data[2]
 
-# %%
+# #%%
 print(f"Stats for {groups[3]}")
 all_data[3]
 
-# %%
+# #%%
 # step6
 plotters = [
     Plotter(nrows=2, ncols=2, figsize=(16, 10)),
@@ -385,13 +385,13 @@ plotters[1].save("res/stats2.png", dpi=200)
 plotters[2].save("res/stats3.png", dpi=200)
 plotters[3].save("res/stats4.png", dpi=200)
 
-# %% [markdown]
+# #%% [markdown]
 # ### **Stage 4** (tasks [5] [6] [7]): _Regression and Intervals_
 
-# %% [markdown]
+# #%% [markdown]
 # ##### **_Calculations and plot drawing_**
 
-# %%
+# #%%
 # step7
 plotter = Plotter(4, 4, (30, 30))
 kde_plotter = Plotter(1, 4, (24, 6))
@@ -493,10 +493,10 @@ kde_plotter.save("res/kde.png", dpi=200)
 
 res_df = pd.DataFrame(results)
 
-# %% [markdown]
+# #%% [markdown]
 # ##### **_Task 7 results table_**
 
-# %%
+# #%%
 res_df.to_csv("res/regression_stats.csv", index=False)
 
 pd.set_option('display.max_rows', None)
@@ -506,10 +506,10 @@ pd.set_option('display.max_colwidth', None)
 
 res_df
 
-# %% [markdown]
+# #%% [markdown]
 # ### **Stage 5** (tasks [8] [9]):
 
-# %%
+# #%%
 for i, param in enumerate(main.params):
     values = main.iris[param]
     groups = main.iris["species"]
@@ -531,7 +531,7 @@ for i, param in enumerate(main.params):
     print(tukey.summary())
     print("=" * 60 + "\n")
 
-# %%
+# #%%
 plotter = Plotter(2, 2, (24, 16))
 
 for i, param in enumerate(main.params):

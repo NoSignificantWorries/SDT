@@ -1,4 +1,4 @@
-# %%
+# #%%
 import os
 import sys
 from typing import Tuple, Optional, Any
@@ -13,23 +13,26 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticD
 from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 import pandas as pd
-from scipy import stats
+import scipy
 import time
 from sklearn.utils import resample
 
-# %%
+# #%%
 DPI = 150
 SAVE_DIR="res"
 COLORS = ["#e78284", "#a6d189", "#b4befe"]
 EDGECOLOR = "#11111b"
 STYLES = ["o", "s", "^"]
+MAKE_16x16 = True
 
+# #%%
 
 class Plotter:
     def __init__(self, nrows: int = 1, ncols: int = 1, figsize: Tuple[int, int] = (6, 6)) -> None:
         self.fig, self.axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-        self.nrows = 0
-        self.ncols = 0
+        self.nrows = nrows
+        self.ncols = ncols
+        self.size = self.nrows * self.ncols
         
         if nrows == 1 and ncols == 1:
             self.axes = np.array([self.axes])
@@ -85,6 +88,35 @@ class Plotter:
     
     def del_position(self) -> None:
         self.position = None
+    
+    def dataset_visual(self, X, y, colors, alpha=0.6) -> None:
+        if self.size != len(X.columns) ** 2:
+            raise ValueError("ERROR: Features count not matched with figure size!")
+        
+        columns = X.columns
+        classes = y.unique()
+        for i, rowname in enumerate(columns):
+            for j, colname in enumerate(columns):
+                self.set_position(irow=i, icol=j)
+                
+                for k, class_value in enumerate(classes):
+                    class_mask = y == class_value
+                    if i == j:
+                        local_data = X[class_mask][colname]
+                        kde = scipy.stats.gaussian_kde(local_data)
+                        x = np.linspace(local_data.min(), local_data.max(), 100)
+                        self.fill_between(x, np.zeros_like(x), kde(x), color=colors[k], alpha=alpha, label=f"class \"{class_value}\"")
+                        continue
+
+                    self.scatter(X[class_mask][colname], X[class_mask][rowname], color=colors[k], alpha=alpha, label=f"class \"{class_value}\"")
+                
+                if i == j:
+                    self.labels("value", "count", colname)
+                else:
+                    self.labels(colname, rowname, "")
+                
+                self.grid(True, alpha=0.3)
+                self.legend()
         
     def labels(self,
                xlabel: str,
@@ -115,19 +147,33 @@ def cache_dataframe(cache_file):
         @wraps(func)
         def wrapper(*args, **kwargs):
             if os.path.exists(cache_file):
-                print(f"> Loading from cache: {cache_file}")
+                print(f"\033[90m> Loading from cache: {cache_file}\033[0m")
                 return pd.read_pickle(cache_file)
             else:
-                print("> Generating a new dataset...")
+                print("\033[90m> Generating a new dataset...\033[0m")
                 df = func(*args, **kwargs)
                 df.to_pickle(cache_file)
-                print(f"> Data loaded to cache: {cache_file}")
+                print(f"\033[90m> Data loaded to cache: {cache_file}\033[0m")
                 return df
         return wrapper
     return decorator
 
-# %%
-def generate_new_dataset(n_samples, n_features, n_classes):
+# #%%
+# =============================================================================
+# ЗАДАНИЕ 2.1 - Генерация датасета df1
+# =============================================================================
+print("=== ЗАДАНИЕ 2.1 - Генерация датасета df1 ===")
+
+np.random.seed(42)
+n_samples = 1000
+n_features = 16
+n_classes = 3
+
+COLUMNS = [f"feature_{i+1}" for i in range(n_features)]
+
+
+@cache_dataframe("cache/df1_main.pkl")
+def create_dataframe(n_samples, n_features, n_classes):
     X1, y1 = make_blobs(n_samples=n_samples * (n_classes - 1), 
                         n_features=n_features, 
                         centers=2,
@@ -148,22 +194,6 @@ def generate_new_dataset(n_samples, n_features, n_classes):
 
     return df
 
-# =============================================================================
-# ЗАДАНИЕ 2.1 - Генерация датасета df1
-# =============================================================================
-print("=== ЗАДАНИЕ 2.1 - Генерация датасета df1 ===")
-
-np.random.seed(42)
-n_samples = 1000
-n_features = 16
-n_classes = 3
-
-COLUMNS = [f"feature_{i+1}" for i in range(n_features)]
-
-
-@cache_dataframe("cache/df1_main.pkl")
-def create_dataframe(n_samples, n_features, n_classes):
-    return generate_new_dataset(n_samples, n_features, n_classes)
 
 df1 = create_dataframe(n_samples, n_features, n_classes)
 
@@ -171,8 +201,9 @@ print(f"Размерность df1: {df1.shape}")
 print(f"Количество классов: {len(df1["target"].unique())}")
 print("Количество объектов в каждом классе:")
 print(df1["target"].value_counts().sort_index())
+print(df1.head())
 
-# %%
+# #%%
 X = df1[COLUMNS]
 y = df1["target"]
 
@@ -194,7 +225,7 @@ plotter.legend()
 plotter.tight_layout()
 plotter.save(f"{SAVE_DIR}/data_PCA.png", dpi=DPI)
 
-# %%
+# #%%
 plotter = Plotter(nrows=4, ncols=4, figsize=(24, 24))
 
 for i, col in enumerate(COLUMNS):
@@ -210,14 +241,13 @@ for i, col in enumerate(COLUMNS):
 plotter.tight_layout()
 plotter.save(f"{SAVE_DIR}/df1_hists.png", dpi=DPI)
 
-# %%
+# #%%
 # =============================================================================
 # ЗАДАНИЕ 2.2 - Создание датасетов с повторенными объектами
 # =============================================================================
 print("\n=== ЗАДАНИЕ 2.2 - Создание датасетов с повторенными объектами ===")
 
-# Класс 1 будем повторять (класс с пересечением)
-class_to_repeat = 1
+CLASS_TO_REPEAT = 1
 repetition_factors = [2, 5, 10, 20, 50, 100, 1000, 10000]
 
 datasets = {"df1": df1}
@@ -228,7 +258,7 @@ for factor in repetition_factors:
     @cache_dataframe(f"cache/{df_name}.pkl")
     def generate_copy(base_df):
         new_df = base_df.copy()
-        class_samples = df1[df1["target"] == class_to_repeat]
+        class_samples = df1[df1["target"] == CLASS_TO_REPEAT]
         repeated_samples = pd.concat([class_samples] * (factor - 1), ignore_index=True)
         new_df = pd.concat([new_df, repeated_samples], ignore_index=True)
         
@@ -236,13 +266,33 @@ for factor in repetition_factors:
     
     new_df = generate_copy(df1)
     datasets[df_name] = new_df
-    print(f"Создан {df_name}: {new_df.shape} объектов")
+    print(f"Getted {df_name}: {new_df.shape} objects")
 
 DATASET_NAMES = list(datasets.keys())
 
+# #%%
+
+if MAKE_16x16:
+    plotter = Plotter(nrows=16, ncols=16, figsize=(50, 50))
+
+    plotter.dataset_visual(df1[COLUMNS], df1["target"], COLORS, alpha=0.6)
+
+    plotter.tight_layout()
+    plotter.save("res/df1_16x16.png", dpi=200)
+
+# #%%
+
+selected_classes = [0, 1]
+selected_features = [COLUMNS[0], COLUMNS[1]]
+
+plotter = Plotter(nrows=1, ncols=1, figsize=(48, 48))
+
+plotter.tight_layout()
+plotter.save("res/LDA_ROC.png", dpi=DPI)
+
 sys.exit(0)
 
-# %%
+# #%%
 # =============================================================================
 # ЗАДАНИЕ 2.3 - Визуализация LDA для разных датасетов
 # =============================================================================
@@ -476,7 +526,7 @@ for i, df_name in enumerate(DATASET_NAMES):
     y_data = df_filtered["target"].values
     
     # Бинаризуем метки для ROC анализа (целевой класс = 1)
-    y_binary = (y_data == class_to_repeat).astype(int)
+    y_binary = (y_data == CLASS_TO_REPEAT).astype(int)
     
     # Бутстреп ROC кривых
     lda = LinearDiscriminantAnalysis()
@@ -568,7 +618,7 @@ for i, df_name in enumerate(DATASET_NAMES):
     
     X_data = df_filtered[selected_features].values
     y_data = df_filtered["target"].values
-    y_binary = (y_data == class_to_repeat).astype(int)
+    y_binary = (y_data == CLASS_TO_REPEAT).astype(int)
     
     # Бутстреп PR кривых
     lda = LinearDiscriminantAnalysis()
@@ -669,7 +719,7 @@ df_filtered = df10[df10["target"].isin(selected_classes)].copy()
 
 X_data = df_filtered[selected_features].values
 y_data = df_filtered["target"].values
-y_binary = (y_data == class_to_repeat).astype(int)
+y_binary = (y_data == CLASS_TO_REPEAT).astype(int)
 
 # Параметры кросс-валидации
 cv_folds = [3, 5, 10, 20, 50, 100]
@@ -779,7 +829,7 @@ feature_counts = [2, 4, 8, 16]
 df1_data = datasets["df1"]
 df_filtered = df1_data[df1_data["target"].isin(selected_classes)].copy()
 
-y_binary = (df_filtered["target"] == class_to_repeat).astype(int)
+y_binary = (df_filtered["target"] == CLASS_TO_REPEAT).astype(int)
 
 fig, axes = plt.subplots(2, 2, figsize=(15, 12))
 axes = axes.flatten()
@@ -892,7 +942,7 @@ for i, df_name in enumerate(DATASET_NAMES):
     
     X_data = df_filtered[selected_features].values
     y_data = df_filtered["target"].values
-    y_binary = (y_data == class_to_repeat).astype(int)
+    y_binary = (y_data == CLASS_TO_REPEAT).astype(int)
     
     # Бутстреп ROC кривых для QDA
     qda = QuadraticDiscriminantAnalysis()
