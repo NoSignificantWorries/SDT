@@ -2,3 +2,5 @@
 .vscode/
 .venv/
 .ipynb_checkpoints/
+
+cache/
