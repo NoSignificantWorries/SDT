@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.axes as mpl_axes
 from matplotlib.colors import ListedColormap
 # data workflows
+import tqdm
 import scipy
 from sklearn.utils import resample
 from sklearn.decomposition import PCA
@@ -325,187 +326,162 @@ if MAKE_16x16:
 
 # #%%
 
-def bootstrap_roc(X, y, model, n_bootstraps=1000, n_jobs=-1):
-    n_jobs = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
-    print(f"Запуск бутстрапа на {n_jobs} ядрах...")
-    
-    for i in range(n_bootstraps):
-        X_boot, y_boot = resample(X, y, random_state=i)
-        model_boot = model
-        model_boot.fit(X_boot, y_boot)
-        y_score_boot = model_boot.predict_proba(X)[:, 1]
-        fpr_boot, tpr_boot, _ = roc_curve(y, y_score_boot)
-        precision_boot, recall_boot, _ = precision_recall_curve(y, y_score_boot)
+def fit_model(name, model, X, y):
+    with timer() as t:
+        @cache_data(name)
+        def func(X, y):
+            l_model = model
+            l_model.fit(X, y)
+            
+            return l_model
         
-        # Интерполяция на общую сетку
-        base_fpr = np.linspace(0, 1, 101)
-        tpr_interp = np.interp(base_fpr, fpr_boot, tpr_boot)
-        tpr_interp[0] = 0.0
-        
-        base_recall = np.linspace(0, 1, 101)
-        precision_interp = np.interp(base_recall, recall_boot[::-1], precision_boot[::-1])
-        
-        auc_boot = auc(fpr_boot, tpr_boot)
-        auprc_boot = auc(recall_boot, precision_boot)
-        
-        return tpr_interp, precision_interp, auc_boot, auprc_boot
-    
-    tpr_bootstraps, precision_bootstraps, auc_bootstraps, auprc_bootstraps = zip(*results)
-    
-    return np.array(tpr_bootstraps), np.array(precision_bootstraps), \
-           np.array(auc_bootstraps), np.array(auprc_bootstraps)
+        fitted_model = func(X, y)
+
+    return fitted_model, t.elapsed
 
 
-def bootstrap_roc_pr_curves(X, y, model, n_bootstraps=1000, alpha=0.05, n_jobs=-1):
-    # Основная модель
-    model_main = model
-    model_main.fit(X, y)
-    y_score_main = model_main.predict_proba(X)[:, 1]
+def filter_data(df, classes, features):
+    df_filtered = df[df["target"].isin(classes)].copy()
+    X, y = df_filtered[features].values, df_filtered["target"].values
     
-    # Основные кривые
-    fpr_main, tpr_main, _ = roc_curve(y, y_score_main)
-    precision_main, recall_main, _ = precision_recall_curve(y, y_score_main)
-    roc_auc_main = auc(fpr_main, tpr_main)
-    pr_auc_main = auc(recall_main, precision_main)
-    
-    # Параллельный бутстрап
-    tpr_bootstraps, precision_bootstraps, auc_bootstraps, auprc_bootstraps = \
-        bootstrap_roc(X, y, model, n_bootstraps, n_jobs)
-    
-    # Общие оси для интерполяции
-    base_fpr = np.linspace(0, 1, 101)
-    base_recall = np.linspace(0, 1, 101)
-    
-    # Доверительные интервалы для ROC
-    tpr_lower = np.percentile(tpr_bootstraps, (alpha/2)*100, axis=0)
-    tpr_upper = np.percentile(tpr_bootstraps, (1-alpha/2)*100, axis=0)
-    roc_auc_ci_lower = np.percentile(auc_bootstraps, (alpha/2)*100)
-    roc_auc_ci_upper = np.percentile(auc_bootstraps, (1-alpha/2)*100)
-    
-    # Доверительные интервалы для PR
-    precision_lower = np.percentile(precision_bootstraps, (alpha/2)*100, axis=0)
-    precision_upper = np.percentile(precision_bootstraps, (1-alpha/2)*100, axis=0)
-    pr_auc_ci_lower = np.percentile(auprc_bootstraps, (alpha/2)*100)
-    pr_auc_ci_upper = np.percentile(auprc_bootstraps, (1-alpha/2)*100)
-    
-    return {
-        'fpr_main': fpr_main,
-        'tpr_main': tpr_main, 
-        'roc_auc_main': roc_auc_main,
-        'base_fpr': base_fpr,
-        'tpr_lower': tpr_lower,
-        'tpr_upper': tpr_upper,
-        'roc_auc_ci': (roc_auc_ci_lower, roc_auc_ci_upper),
-        
-        'precision_main': precision_main,
-        'recall_main': recall_main,
-        'pr_auc_main': pr_auc_main,
-        'base_recall': base_recall,
-        'precision_lower': precision_lower,
-        'precision_upper': precision_upper,
-        'pr_auc_ci': (pr_auc_ci_lower, pr_auc_ci_upper),
-        
-        'auc_bootstraps': auc_bootstraps,
-        'auprc_bootstraps': auprc_bootstraps
-    }
+    return df_filtered, X, y
 
-# #%%
 
-selected_classes = [0, 1]
-selected_features = [COLUMNS[0], COLUMNS[3]]
-# selected_features = [COLUMNS[5], COLUMNS[15]]
-
-plotter = Plotter(nrows=9, ncols=3, figsize=(16, 32))
-
-centers_data = []
-lda_times = {}
-for i, dataset in enumerate(DATASET_NAMES):
-    if dataset not in datasets:
-        continue
-    
-    df = datasets[dataset]
-
-    df_filtered = df[df["target"].isin(selected_classes)].copy()
-
+def calc_mass_points(df, name, classes, features):
     centers = {}
-    for class_label in selected_classes:
-        class_data = df_filtered[df_filtered["target"] == class_label][selected_features]
+    for class_label in classes:
+        class_data = df[df["target"] == class_label][features]
         center = class_data.mean().values
         centers[class_label] = center
     
-    overall_center = df_filtered[selected_features].mean().values
+    overall_center = df[features].mean().values
     
-    midpoint = (centers[selected_classes[0]] + centers[selected_classes[1]]) / 2
+    midpoint = (centers[classes[0]] + centers[classes[1]]) / 2
     
-    centers_data.append({
-        "dataset": dataset,
-        "center_class_0": centers[selected_classes[0]],
-        "center_class_1": centers[selected_classes[1]],
+    return {
+        "dataset": name,
+        "center_class_0": centers[classes[0]],
+        "center_class_1": centers[classes[1]],
         "overall_center": overall_center,
         "midpoint": midpoint
-    })
-    
-    X_plot = df_filtered[selected_features].values
-    y_plot = df_filtered["target"].values
-    
-    with timer() as t:
-        @cache_data(f"cache/lda_{dataset}.pkl")
-        def LDA(X, y):
-            lda = LinearDiscriminantAnalysis()
-            lda.fit(X, y)
-            
-            return lda
+    }
+
+
+def ROC_PR_calc(model, X, y, roc=True, pr=True):
+    prediction = model.predict_proba(X)[:, 1]
+    projections = model.transform(X).ravel()
+    size = len(projections)
+
+    res = {"prediction": prediction,
+           "projections": projections,
+           "size": size}
+
+    if roc:
+        fpr, tpr, _ = roc_curve(y, prediction)
+        aucroc = auc(fpr, tpr)
         
-        lda = LDA(X_plot, y_plot)
+        res["fpr"] = fpr
+        res["tpr"] = tpr
+        res["aucroc"] = aucroc
+    if pr:
+        precision, recall, _ = precision_recall_curve(y, prediction)
+        precision_orig_interp = np.interp(recall, recall[::-1], precision[::-1], left=1.0, right=0.0)
+        auprc = auc(recall, precision)
+        
+        res["recall"] = recall
+        res["precision"] = precision_orig_interp
+        res["auprc"] = auprc
     
-    lda_times[dataset] = t.elapsed
+    return res
 
-    x_min, x_max = X_plot[:, 0].min() - 1, X_plot[:, 0].max() + 1
-    y_min, y_max = X_plot[:, 1].min() - 1, X_plot[:, 1].max() + 1
-    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 500),
-                         np.linspace(y_min, y_max, 500))
+
+def ROC_PR_calc_with_area(model, X, y, roc=True, pr=True, n_bootstraps=1000, confidence_level=0.95):
+    data = ROC_PR_calc(model, X, y, roc, pr)
+
+    roc_scores = []
+    pr_scores = []
+    tpr_matrix = []
+    precision_matrix = []
+
+    for _ in tqdm.tqdm(range(n_bootstraps), desc=f"ROC and PR {confidence_level * 100}% CI calculating", unit="Bootstrap"):
+        idx = np.random.choice(data["size"], data["size"], replace=True)
+        if roc:
+            fpr_boot, tpr_boot, _ = roc_curve(y[idx], data["projections"][idx])
+            roc_scores.append(auc(fpr_boot, tpr_boot))
+            tpr_interp = np.interp(data["fpr"], fpr_boot, tpr_boot, left=0, right=1)
+            tpr_matrix.append(tpr_interp)
+        if pr:
+            precision_boot, recall_boot, _ = precision_recall_curve(y[idx], data["projections"][idx])
+            pr_scores.append(auc(recall_boot, precision_boot))
+            precision_interp = np.interp(data["recall"], recall_boot[::-1], precision_boot[::-1], left=1, right=0)
+            precision_matrix.append(precision_interp)
     
-    Z = lda.predict(np.c_[xx.ravel(), yy.ravel()])
+    if roc:
+        tpr_matrix = np.array(tpr_matrix)
+    if pr:
+        precision_matrix = np.array(precision_matrix)
+    
+    alpha = 1 - confidence_level
+    lower_percentile = (alpha / 2) * 100
+    upper_percentile = (1 - alpha / 2) * 100
+    
+    res = data
+    
+    if roc:
+        tpr_lower = np.percentile(tpr_matrix, lower_percentile, axis=0)
+        tpr_upper = np.percentile(tpr_matrix, upper_percentile, axis=0)
+        tpr_mean = np.mean(tpr_matrix, axis=0) 
+        tpr_area = np.trapezoid(tpr_upper - tpr_lower, data["fpr"])
+        
+        res["roc_score_mean"] = np.mean(roc_scores)
+        res["tpr_lower"] = tpr_lower
+        res["tpr_upper"] = tpr_upper
+        res["tpr_mean"] = tpr_mean
+        res["tpr_area"] = tpr_area
+
+    if pr:
+        precision_lower = np.percentile(precision_matrix, lower_percentile, axis=0)
+        precision_upper = np.percentile(precision_matrix, upper_percentile, axis=0)
+        precision_mean = np.mean(precision_matrix, axis=0) 
+        precision_area = np.trapezoid(precision_upper - precision_lower, data["recall"])
+        
+        res["pr_score_mean"] = np.mean(pr_scores)
+        res["precision_lower"] = precision_lower
+        res["precision_upper"] = precision_upper
+        res["precision_mean"] = precision_mean
+        res["precision_area"] = precision_area
+    
+    return res
+
+
+def draw_curve(plotter, idx, ox, oy_origin, oy_mean, oy_lower, oy_upper, score, score_mean, area, conf_level, name, labels, line=([0, 1], [0, 1])):
+    plotter.set_position(idx=idx)
+
+    plotter.plot(*line, color="red", alpha=0.5, linestyle="--")
+    plotter.fill_between(ox, oy_lower, oy_upper, color="green", alpha=0.3, label=f"{name} CI for {conf_level * 100}% ({area:.6f})")
+    plotter.plot(ox, oy_mean, color="blue", linewidth=2, label=f"{name}-curve mean ({score_mean:.6f})")
+    plotter.plot(ox, oy_origin, color="red", linewidth=1, label=f"{name}-curve origin ({score:.6f})")
+    plotter.grid(True, alpha=0.3)
+    plotter.legend()
+    plotter.labels(*labels)
+
+
+def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_max=1000):
+    plotter.set_position(idx=idx)
+
+    x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+    y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, size),
+                         np.linspace(y_min, y_max, size))
+    
+    Z = model.predict(np.c_[xx.ravel(), yy.ravel()])
     Z = Z.reshape(xx.shape)
-    
-    with timer() as t:
-        bootstrap_roc_pr_curves(X_plot, y_plot, LinearDiscriminantAnalysis())
-    
-    print(t.elapsed)
-    
-    '''
-    predicition = lda.predict_proba(X_plot)[:, 1]
-    fpr, tpr, _ = roc_curve(y_plot, predicition)
-    aucroc = auc(fpr, tpr)
-    precision, recall, _ = precision_recall_curve(y_plot, predicition)
-    auprc = auc(recall, precision)
-    
-    plotter.set_position(idx=i * 3 + 1)
-
-    plotter.plot(fpr, tpr, color=MY_COLORS[1], linewidth=2, label=f"ROC-curve ({aucroc})")
-    plotter.plot([0, 1], [0, 1], color=MY_COLORS[0], linestyle="--")
-    plotter.grid(True, alpha=0.3)
-    plotter.legend()
-    plotter.labels("FPR", "TPR", f"ROC-curve for {dataset}")
-    
-    plotter.set_position(idx=i * 3 + 2)
-
-    plotter.plot(recall, precision, color=MY_COLORS[1], linewidth=2, label=f"PR-curve ({auprc})")
-    plotter.plot([0, 1], [1, 0], color=MY_COLORS[0], linestyle="--")
-    plotter.grid(True, alpha=0.3)
-    plotter.legend()
-    plotter.labels("recall", "precision", f"PR-curve for {dataset}")
-    '''
-    
-    plotter.set_position(idx=i * 3)
 
     plotter.contourf(xx, yy, Z, alpha=0.3, cmap=MY_CMAP)
-    selected_indexes = select_unique(X_plot[:, 0], 1000)
-    plotter.scatter(X_plot[:, 0][selected_indexes], X_plot[:, 1][selected_indexes], c=y_plot[selected_indexes], 
+    selected_indexes = select_unique(X[:, 0], scatter_max)
+    plotter.scatter(X[:, 0][selected_indexes], X[:, 1][selected_indexes], c=y[selected_indexes], 
                     cmap=MY_CMAP, edgecolors=EDGECOLOR, s=30)
 
-    centers_info = centers_data[-1]
-    
     plotter.plot([centers_info["center_class_0"][0], centers_info["center_class_1"][0]],
                  [centers_info["center_class_0"][1], centers_info["center_class_1"][1]], "k--", linewidth=3)
     plotter.scatter(centers_info["center_class_0"][0], centers_info["center_class_0"][1], 
@@ -517,8 +493,57 @@ for i, dataset in enumerate(DATASET_NAMES):
     plotter.scatter(centers_info["midpoint"][0], centers_info["midpoint"][1], 
                    c="purple", marker="D", s=150, label="Midpoint", alpha=0.8, edgecolors=EDGECOLOR)
 
-    plotter.labels(selected_features[0], selected_features[1], dataset)
+    plotter.labels(*labels)
     plotter.legend()
+
+
+# #%%
+
+confidence_level = 0.95
+n_bootstraps = 1000
+selected_classes = [0, 1]
+# selected_features = [COLUMNS[0], COLUMNS[3]]
+selected_features = [COLUMNS[5], COLUMNS[15]]
+
+plotter = Plotter(nrows=9, ncols=3, figsize=(16, 32))
+
+centers_data = []
+lda_times = {}
+for i, dataset in enumerate(DATASET_NAMES):
+    if dataset not in datasets:
+        continue
+    
+    df = datasets[dataset]
+    
+    df_filtered, X_plot, y_plot = filter_data(df, selected_classes, selected_features)
+
+    centers_data.append(calc_mass_points(df_filtered, dataset, selected_classes, selected_features))
+    
+    model, time_elapsed = fit_model(f"cache/lda_{selected_classes[0]}_{selected_classes[1]}_{selected_features[0]}_{selected_features[1]}_{dataset}.pkl",
+                      LinearDiscriminantAnalysis(), X_plot, y_plot)
+
+    lda_times[dataset] = time_elapsed
+    
+    roc_pr_stat = ROC_PR_calc_with_area(model, X_plot, y_plot, n_bootstraps=(n_bootstraps if len(y_plot) < 1000000 else 10))
+
+    plotter.set_position(idx=i * 3 + 1)
+    
+    draw_curve(plotter, i * 3 + 1,
+               roc_pr_stat["fpr"], roc_pr_stat["tpr"], roc_pr_stat["tpr_mean"],
+               roc_pr_stat["tpr_lower"], roc_pr_stat["tpr_upper"],
+               roc_pr_stat["aucroc"], roc_pr_stat["roc_score_mean"],
+               roc_pr_stat["tpr_area"],
+               confidence_level, "ROC", ("FPR", "TPR", f"ROC-curve for {dataset}"))
+
+    draw_curve(plotter, i * 3 + 2,
+               roc_pr_stat["recall"], roc_pr_stat["precision"], roc_pr_stat["precision_mean"],
+               roc_pr_stat["precision_lower"], roc_pr_stat["precision_upper"],
+               roc_pr_stat["auprc"], roc_pr_stat["pr_score_mean"],
+               roc_pr_stat["precision_area"],
+               confidence_level, "PR", ("recall", "precision", f"PR-curve for {dataset}"), line=([0, 1], [1, 0]))
+    plotter.invert_xaxis()
+
+    draw_model(plotter, i * 3, 500, model, X_plot, y_plot, centers_data[-1], (selected_features[0], selected_features[1], dataset))
 
 centers_df = pd.DataFrame(centers_data)
 print("Mass centers:")
@@ -641,6 +666,7 @@ plt.tight_layout()
 plt.savefig("cross_validation_curves.png", dpi=300, bbox_inches="tight")
 #plt.show()
 
+'''
 # =============================================================================
 # ЗАДАНИЕ 2.9 - LDA с разным количеством признаков
 # =============================================================================
@@ -805,4 +831,4 @@ for df_name in DATASET_NAMES:
         print(f"{df_name}\t\t{lda_auc:.3f}\t\t{qda_auc:.3f}")
 
 print("\n=== Анализ завершен ===")
-
+'''
