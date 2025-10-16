@@ -656,7 +656,6 @@ def make_stats_for_model(plotter, model, name, datasets, features, classes, n_bo
     print("Mass centers:")
     print(centers_df)
 
-
 # #%%
 selected_classes = [0, 1]
 # selected_features = [COLUMNS[0], COLUMNS[3]]
@@ -723,6 +722,96 @@ plotter.tight_layout()
 plotter.save("res/ROC_PR_many_features.png", dpi=DPI)
 
 # #%%
+
+confidence_level = 0.95
+selected_classes = [0, 1]
+df = datasets["df10"]
+# selected_features = COLUMNS
+# selected_features = [COLUMNS[5], COLUMNS[15]]
+selected_features = [COLUMNS[6], COLUMNS[8]]
+df_filtered, X, y = filter_data(df, selected_classes, selected_features)
+model = LinearDiscriminantAnalysis()
+
+plotter = Plotter(nrows=6, ncols=2, figsize=(24, 24))
+
+k_folds = [3, 5, 10, 20, 50, 100]
+for i, k in enumerate(k_folds):
+    kf = StratifiedKFold(n_splits=k, shuffle=True, random_state=42)
+    
+    all_fpr = []
+    all_tpr = []
+    all_precision = []
+    all_recall = []
+    all_auc_roc = []
+    all_auc_prc = []
+    
+    mean_fpr = np.linspace(0, 1, 100)
+    mean_recall = np.linspace(0, 1, 100)
+
+    for train_idx, test_idx in tqdm.tqdm(kf.split(X, y), total=k):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        
+        model.fit(X_train, y_train)
+        
+        y_proba = model.predict_proba(X_test)[:, 1]
+        
+        fpr, tpr, _ = roc_curve(y_test, y_proba)
+        roc_auc = auc(fpr, tpr)
+        
+        interp_tpr = np.interp(mean_fpr, fpr, tpr)
+        interp_tpr[0] = 0.0
+        all_fpr.append(mean_fpr)
+        all_tpr.append(interp_tpr)
+        all_auc_roc.append(roc_auc)
+        
+        precision, recall, _ = precision_recall_curve(y_test, y_proba)
+        prc_auc = auc(recall, precision)
+        
+        interp_precision = np.interp(mean_recall, recall[::-1], precision[::-1])
+        all_precision.append(interp_precision)
+        all_recall.append(mean_recall)
+        all_auc_prc.append(prc_auc)
+    
+    all_tpr = np.array(all_tpr)
+    all_precision = np.array(all_precision)
+    
+    mean_tpr = np.mean(all_tpr, axis=0)
+    std_tpr = np.std(all_tpr, axis=0)
+    
+    mean_precision = np.mean(all_precision, axis=0)
+    std_precision = np.std(all_precision, axis=0)
+    
+    tpr_upper = np.minimum(mean_tpr + scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_tpr, 1)
+    tpr_lower = np.maximum(mean_tpr - scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_tpr, 0)
+    
+    precision_upper = np.minimum(mean_precision + scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision, 1)
+    precision_lower = np.maximum(mean_precision - scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision, 0)
+    
+    plotter.set_position(idx=i * 2)
+
+    plotter.plot([0, 1], [0, 1], color="red", linestyle="--")
+    plotter.fill_between(mean_fpr, tpr_lower, tpr_upper, color="green", alpha=0.3, label=f"ROC CI for {confidence_level * 100}%")
+    plotter.plot(mean_fpr, mean_tpr, color="blue", linewidth=2, label=f"ROC-curve mean ({np.mean(all_auc_roc):.6f})")
+    plotter.grid(True, alpha=0.3)
+    plotter.legend()
+    plotter.labels("FPR", "TPR", f"ROC-curve for {k}-folds")
+    
+    plotter.set_position(idx=i * 2 + 1)
+    
+    plotter.plot([1, 0], [0, 1], color="red", linestyle="--")
+    plotter.fill_between(mean_recall, precision_lower, precision_upper, color="green", alpha=0.3, label=f"PR CI for {confidence_level * 100}%")
+    plotter.plot(mean_recall, mean_precision, color="blue", linewidth=2, label=f"PR-curve mean ({np.mean(all_auc_prc):.6f})")
+    plotter.grid(True, alpha=0.3)
+    plotter.legend()
+    plotter.labels("Recall", "Precision", f"PR-curve for {k}-folds")
+
+    plotter.invert_xaxis()
+
+plotter.tight_layout()
+plotter.save("res/k-fold_ROC_PR.png", dpi=DPI)
+
+# #%%
 selected_classes = [0, 1]
 # selected_features = [COLUMNS[0], COLUMNS[3]]
 selected_features = [COLUMNS[6], COLUMNS[8]]
@@ -734,5 +823,3 @@ make_stats_for_model(plotter, QuadraticDiscriminantAnalysis(), "qda", datasets, 
 
 plotter.tight_layout()
 plotter.save("res/QDA_ROC_PR.png", dpi=DPI)
-
-sys.exit(0)
