@@ -283,17 +283,25 @@ def get_cov(df):
 
 cov_matrixes = get_cov(df1)
 
-plotter = Plotter(nrows=4, ncols=2, figsize=(16, 24))
+plotter = Plotter(nrows=4, ncols=4, figsize=(28, 28))
 
 class_names = ["all", "0", "1", "2"]
 for i in range(4):
-    plotter.set_position(idx=i * 2)
+    plotter.set_position(idx=i * 4)
     plotter.imshow(cov_matrixes[..., i * 4], cmap=MY_SMOOTH_CMAP, vmin=0.0, vmax=1.0)
     plotter.labels("", "", f"Pearson for {class_names[i]}")
+    
+    plotter.set_position(idx=i * 4 + 1)
+    plotter.imshow(cov_matrixes[..., i * 4 + 1], cmap=MY_SMOOTH_CMAP, vmin=0.0, vmax=1.0)
+    plotter.labels("", "", f"Pearson p-value for {class_names[i]}")
 
-    plotter.set_position(idx=i * 2 + 1)
-    im = plotter.imshow(cov_matrixes[..., i * 4 + 2], cmap=MY_SMOOTH_CMAP, vmin=0.0, vmax=1.0)
+    plotter.set_position(idx=i * 4 + 2)
+    plotter.imshow(cov_matrixes[..., i * 4 + 2], cmap=MY_SMOOTH_CMAP, vmin=0.0, vmax=1.0)
     plotter.labels("", "", f"Spearman for {class_names[i]}")
+    
+    plotter.set_position(idx=i * 4 + 3)
+    im = plotter.imshow(cov_matrixes[..., i * 4 + 3], cmap=MY_SMOOTH_CMAP, vmin=0.0, vmax=1.0)
+    plotter.labels("", "", f"Spearman p-value for {class_names[i]}")
 
     cbar = plotter.fig.colorbar(im, ax=plotter.position,
                        orientation='vertical',
@@ -302,7 +310,56 @@ for i in range(4):
 plotter.tight_layout()
 plotter.save("res/corelations.png")
 
-sys.exit(0)
+# #%%
+
+all_data = []
+groups = []
+classes = [0, 1, 2]
+
+for k in range(len(classes) + 1):
+    group = classes[k - 1] if k > 0 else "all"
+    groups.append(group)
+    data = {
+        "Pair": [],
+        "Pearson": [],
+        "Pearson p-value": [],
+        "Spearman": [],
+        "Spearman p-value": []
+    }
+    local_matrix = cov_matrixes[..., (k * 4):(k + 1) * 4]
+    elems = ["Pearson", "Pearson p-value", "Spearman", "Spearman p-value"]
+    for i, iparam in enumerate(COLUMNS):
+        for j, jparam in enumerate(COLUMNS):
+                data["Pair"].append(f"{iparam} x {jparam}")
+                data["Pearson"].append(local_matrix[i, j, 0])
+                data["Pearson p-value"].append(local_matrix[i, j, 1])
+                data["Spearman"].append(local_matrix[i, j, 2])
+                data["Spearman p-value"].append(local_matrix[i, j, 3])
+    data = pd.DataFrame(data)
+    data.to_csv(f"res/stats_for_{group}.csv", index=False)
+    
+    all_data.append(data)
+
+# #%%
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', None)
+
+print(f"Stats for {groups[0]}")
+all_data[0]
+
+# #%%
+print(f"Stats for {groups[1]}")
+all_data[1]
+
+# #%%
+print(f"Stats for {groups[2]}")
+all_data[2]
+
+# #%%
+print(f"Stats for {groups[3]}")
+all_data[3]
 
 # #%%
 X = df1[COLUMNS]
