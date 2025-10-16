@@ -15,7 +15,7 @@ import pandas as pd
 # visualization
 import matplotlib.pyplot as plt
 import matplotlib.axes as mpl_axes
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 # data workflows
 import tqdm
 import scipy
@@ -31,6 +31,11 @@ SAVE_DIR="res"
 COLORS = ["#e78284", "#a6d189", "#b4befe"]
 MY_COLORS = ["#f38ba8", "#cba6f7"]
 MY_CMAP = ListedColormap(MY_COLORS)
+MY_SMOOTH_CMAP = LinearSegmentedColormap.from_list(
+    "my_smooth_gradient",
+    MY_COLORS[::-1],
+    N=256
+)
 EDGECOLOR = "#11111b"
 STYLES = ["o", "s", "^"]
 # MAKE_16x16 = True
@@ -153,6 +158,32 @@ class Plotter:
         self.fig.show()
 
 
+# #%%
+def data_stats(data1, data2) -> Any:
+    Pearson_v, Pearson_pv = scipy.stats.pearsonr(data1, data2)
+    spearman_v, spearman_pv = scipy.stats.spearmanr(data1, data2)
+
+    return np.array([Pearson_v, Pearson_pv, spearman_v, spearman_pv])
+
+
+def get_cov_matrixes(df, features, classes):
+    stats = np.zeros((len(features), len(features), (len(classes) + 1) * 4))
+
+    for i, iparam in enumerate(features):
+        for j, jparam in enumerate(features):
+            data = np.array(df[[iparam, jparam, "target"]])
+            
+            stats[i, j, 0:4] = data_stats(data[..., 0], data[..., 1])
+
+            for k, group in enumerate(classes):
+                data_by_class = data[data[..., -1] == k]
+                
+                stats[i, j, (k + 1) * 4:(k + 2) * 4] = data_stats(data_by_class[..., 0], data_by_class[..., 1])
+    
+    return stats
+
+# #%%
+
 def cache_data(cache_file):
     def decorator(func):
         @wraps(func)
@@ -201,10 +232,6 @@ def select_unique(arr, n):
 
 
 # #%%
-# =============================================================================
-# ЗАДАНИЕ 2.1 - Генерация датасета df1
-# =============================================================================
-print("=== ЗАДАНИЕ 2.1 - Генерация датасета df1 ===")
 
 np.random.seed(42)
 n_samples = 1000
@@ -243,7 +270,39 @@ print(f"Размерность df1: {df1.shape}")
 print(f"Количество классов: {len(df1["target"].unique())}")
 print("Количество объектов в каждом классе:")
 print(df1["target"].value_counts().sort_index())
-print(df1.head())
+print(df1.describe())
+
+# #%%
+
+@cache_data("cache/cov_matrixes.pkl")
+def get_cov(df):
+    cov_matrixes = get_cov_matrixes(df, COLUMNS, [0, 1, 2])
+    
+    return cov_matrixes
+
+
+cov_matrixes = get_cov(df1)
+
+plotter = Plotter(nrows=4, ncols=2, figsize=(16, 24))
+
+class_names = ["all", "0", "1", "2"]
+for i in range(4):
+    plotter.set_position(idx=i * 2)
+    plotter.imshow(cov_matrixes[..., i * 4], cmap=MY_SMOOTH_CMAP, vmin=0.0, vmax=1.0)
+    plotter.labels("", "", f"Pearson for {class_names[i]}")
+
+    plotter.set_position(idx=i * 2 + 1)
+    im = plotter.imshow(cov_matrixes[..., i * 4 + 2], cmap=MY_SMOOTH_CMAP, vmin=0.0, vmax=1.0)
+    plotter.labels("", "", f"Spearman for {class_names[i]}")
+
+    cbar = plotter.fig.colorbar(im, ax=plotter.position,
+                       orientation='vertical',
+                       pad=0.1)
+
+plotter.tight_layout()
+plotter.save("res/corelations.png")
+
+sys.exit(0)
 
 # #%%
 X = df1[COLUMNS]
@@ -284,11 +343,6 @@ plotter.tight_layout()
 plotter.save(f"{SAVE_DIR}/df1_hists.png", dpi=DPI)
 
 # #%%
-# =============================================================================
-# ЗАДАНИЕ 2.2 - Создание датасетов с повторенными объектами
-# =============================================================================
-print("\n=== ЗАДАНИЕ 2.2 - Создание датасетов с повторенными объектами ===")
-
 CLASS_TO_REPEAT = 1
 repetition_factors = [2, 5, 10, 20, 50, 100, 1000, 10000]
 
