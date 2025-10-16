@@ -7,8 +7,7 @@ from typing import Tuple, Optional, Any
 from functools import wraps
 from contextlib import contextmanager
 from dataclasses import dataclass
-from joblib import Parallel, delayed
-import multiprocessing
+import random
 
 # data
 import numpy as np
@@ -20,11 +19,10 @@ from matplotlib.colors import ListedColormap
 # data workflows
 import tqdm
 import scipy
-from sklearn.utils import resample
 from sklearn.decomposition import PCA
 from sklearn.datasets import make_blobs
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
-from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
+from sklearn.metrics import roc_curve, auc, precision_recall_curve
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 
 # #%%
@@ -342,13 +340,15 @@ def fit_model(name, model, X, y):
 
 def filter_data(df, classes, features):
     df_filtered = df[df["target"].isin(classes)].copy()
+    df_filtered["target"] = pd.factorize(df_filtered["target"])[0]
     X, y = df_filtered[features].values, df_filtered["target"].values
     
     return df_filtered, X, y
 
 
-def calc_mass_points(df, name, classes, features):
+def calc_mass_points(df, name, features):
     centers = {}
+    classes = df["target"].unique()
     for class_label in classes:
         class_data = df[df["target"] == class_label][features]
         center = class_data.mean().values
@@ -367,9 +367,12 @@ def calc_mass_points(df, name, classes, features):
     }
 
 
-def ROC_PR_calc(model, X, y, roc=True, pr=True):
+def ROC_PR_calc(model, X, y, roc=True, pr=True, no_proj=False):
     prediction = model.predict_proba(X)[:, 1]
-    projections = model.transform(X).ravel()
+    if no_proj:
+        projections = prediction
+    else:
+        projections = model.transform(X).ravel()
     size = len(projections)
 
     res = {"prediction": prediction,
@@ -395,8 +398,8 @@ def ROC_PR_calc(model, X, y, roc=True, pr=True):
     return res
 
 
-def ROC_PR_calc_with_area(model, X, y, roc=True, pr=True, n_bootstraps=1000, confidence_level=0.95):
-    data = ROC_PR_calc(model, X, y, roc, pr)
+def ROC_PR_calc_with_area(model, X, y, roc=True, pr=True, n_bootstraps=1000, confidence_level=0.95, no_proj=False):
+    data = ROC_PR_calc(model, X, y, roc, pr, no_proj=no_proj)
 
     roc_scores = []
     pr_scores = []
@@ -499,336 +502,126 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
 
 # #%%
 
-confidence_level = 0.95
-n_bootstraps = 1000
+def make_stats_for_model(plotter, model, name, datasets, features, classes, n_bootstraps=(1000, 10), confidence_level=0.95, no_proj=False):
+    centers_data = []
+    lda_times = {}
+    for i, dataset in enumerate(DATASET_NAMES):
+        if dataset not in datasets:
+            continue
+        
+        df = datasets[dataset]
+        
+        df_filtered, X_plot, y_plot = filter_data(df, classes, features)
+
+        centers_data.append(calc_mass_points(df_filtered, dataset, features))
+        
+        model, time_elapsed = fit_model(f"cache/{name}_{classes[0]}_{classes[1]}_{features[0]}_{features[1]}_{dataset}.pkl",
+                                        model, X_plot, y_plot)
+
+        lda_times[dataset] = time_elapsed
+        
+        roc_pr_stat = ROC_PR_calc_with_area(model, X_plot, y_plot, n_bootstraps=(n_bootstraps[0] if len(y_plot) < 1000000 else n_bootstraps[1]), no_proj=no_proj)
+
+        plotter.set_position(idx=i * 3 + 1)
+        
+        draw_curve(plotter, i * 3 + 1,
+                   roc_pr_stat["fpr"], roc_pr_stat["tpr"], roc_pr_stat["tpr_mean"],
+                   roc_pr_stat["tpr_lower"], roc_pr_stat["tpr_upper"],
+                   roc_pr_stat["aucroc"], roc_pr_stat["roc_score_mean"],
+                   roc_pr_stat["tpr_area"],
+                   confidence_level, "ROC", ("FPR", "TPR", f"ROC-curve for {dataset}"))
+
+        draw_curve(plotter, i * 3 + 2,
+                   roc_pr_stat["recall"], roc_pr_stat["precision"], roc_pr_stat["precision_mean"],
+                   roc_pr_stat["precision_lower"], roc_pr_stat["precision_upper"],
+                   roc_pr_stat["auprc"], roc_pr_stat["pr_score_mean"],
+                   roc_pr_stat["precision_area"],
+                   confidence_level, "PR", ("recall", "precision", f"PR-curve for {dataset}"), line=([0, 1], [1, 0]))
+        plotter.invert_xaxis()
+
+        draw_model(plotter, i * 3, 500, model, X_plot, y_plot, centers_data[-1], (features[0], features[1], dataset))
+
+    centers_df = pd.DataFrame(centers_data)
+    print("Mass centers:")
+    print(centers_df)
+
+
+# #%%
 selected_classes = [0, 1]
 # selected_features = [COLUMNS[0], COLUMNS[3]]
-selected_features = [COLUMNS[5], COLUMNS[15]]
+selected_features = [COLUMNS[6], COLUMNS[8]]
+# selected_features = [COLUMNS[5], COLUMNS[15]]
 
-plotter = Plotter(nrows=9, ncols=3, figsize=(16, 32))
+plotter = Plotter(nrows=len(datasets), ncols=3, figsize=(16, 32))
 
-centers_data = []
-lda_times = {}
-for i, dataset in enumerate(DATASET_NAMES):
-    if dataset not in datasets:
-        continue
+make_stats_for_model(plotter, LinearDiscriminantAnalysis(), "lda", datasets, selected_features, selected_classes)
+
+plotter.tight_layout()
+plotter.save("res/LDA_ROC_PR_1.png", dpi=DPI)
+
+# #%%
+
+selected_classes = [1, 2]
+# selected_features = [COLUMNS[0], COLUMNS[3]]
+selected_features = [COLUMNS[6], COLUMNS[8]]
+# selected_features = [COLUMNS[5], COLUMNS[15]]
+
+plotter = Plotter(nrows=len(datasets), ncols=3, figsize=(16, 32))
+
+make_stats_for_model(plotter, LinearDiscriminantAnalysis(), "lda", datasets, selected_features, selected_classes)
+
+plotter.tight_layout()
+plotter.save("res/LDA_ROC_PR_2.png", dpi=DPI)
+
+# #%%
+
+confidence_level = 0.95
+n_bootstraps = (1000, 10)
+selected_classes = [0, 1]
+
+plotter = Plotter(nrows=4, ncols=2, figsize=(16, 24))
+
+df = datasets["df1"]
     
-    df = datasets[dataset]
+for i, current_n_features in enumerate([2, 4, 8, 16]):
+    selected_features = random.sample(COLUMNS, current_n_features)
     
     df_filtered, X_plot, y_plot = filter_data(df, selected_classes, selected_features)
-
-    centers_data.append(calc_mass_points(df_filtered, dataset, selected_classes, selected_features))
     
-    model, time_elapsed = fit_model(f"cache/lda_{selected_classes[0]}_{selected_classes[1]}_{selected_features[0]}_{selected_features[1]}_{dataset}.pkl",
-                      LinearDiscriminantAnalysis(), X_plot, y_plot)
+    model, time_elapsed = fit_model(f"cache/lda_many_{selected_classes[0]}_{selected_classes[1]}_{current_n_features}.pkl",
+                                    LinearDiscriminantAnalysis(), X_plot, y_plot)
 
-    lda_times[dataset] = time_elapsed
-    
-    roc_pr_stat = ROC_PR_calc_with_area(model, X_plot, y_plot, n_bootstraps=(n_bootstraps if len(y_plot) < 1000000 else 10))
+    roc_pr_stat = ROC_PR_calc_with_area(model, X_plot, y_plot, n_bootstraps=(n_bootstraps[0] if len(y_plot) < 1000000 else n_bootstraps[1]))
 
-    plotter.set_position(idx=i * 3 + 1)
-    
-    draw_curve(plotter, i * 3 + 1,
+    draw_curve(plotter, i * 2,
                roc_pr_stat["fpr"], roc_pr_stat["tpr"], roc_pr_stat["tpr_mean"],
                roc_pr_stat["tpr_lower"], roc_pr_stat["tpr_upper"],
                roc_pr_stat["aucroc"], roc_pr_stat["roc_score_mean"],
                roc_pr_stat["tpr_area"],
-               confidence_level, "ROC", ("FPR", "TPR", f"ROC-curve for {dataset}"))
+               confidence_level, "ROC", ("FPR", "TPR", f"ROC-curve for {current_n_features} features"))
 
-    draw_curve(plotter, i * 3 + 2,
+    draw_curve(plotter, i * 2 + 1,
                roc_pr_stat["recall"], roc_pr_stat["precision"], roc_pr_stat["precision_mean"],
                roc_pr_stat["precision_lower"], roc_pr_stat["precision_upper"],
                roc_pr_stat["auprc"], roc_pr_stat["pr_score_mean"],
                roc_pr_stat["precision_area"],
-               confidence_level, "PR", ("recall", "precision", f"PR-curve for {dataset}"), line=([0, 1], [1, 0]))
+               confidence_level, "PR", ("recall", "precision", f"PR-curve for {current_n_features} features"), line=([0, 1], [1, 0]))
     plotter.invert_xaxis()
 
-    draw_model(plotter, i * 3, 500, model, X_plot, y_plot, centers_data[-1], (selected_features[0], selected_features[1], dataset))
+plotter.tight_layout()
+plotter.save("res/ROC_PR_many_features.png", dpi=DPI)
 
-centers_df = pd.DataFrame(centers_data)
-print("Mass centers:")
-print(centers_df)
+# #%%
+selected_classes = [0, 1]
+# selected_features = [COLUMNS[0], COLUMNS[3]]
+selected_features = [COLUMNS[6], COLUMNS[8]]
+# selected_features = [COLUMNS[5], COLUMNS[15]]
+
+plotter = Plotter(nrows=len(datasets), ncols=3, figsize=(16, 32))
+
+make_stats_for_model(plotter, QuadraticDiscriminantAnalysis(), "qda", datasets, selected_features, selected_classes, no_proj=True)
 
 plotter.tight_layout()
-plotter.save("res/LDA_ROC.png", dpi=DPI)
+plotter.save("res/QDA_ROC_PR.png", dpi=DPI)
 
 sys.exit(0)
-# #%%
-
-# =============================================================================
-# ЗАДАНИЕ 2.8 - Кросс-валидация для df10
-# =============================================================================
-print("\n=== ЗАДАНИЕ 2.8 - Кросс-валидация для df10 ===")
-
-df10 = datasets["df10"]
-df_filtered = df10[df10["target"].isin(selected_classes)].copy()
-
-X_data = df_filtered[selected_features].values
-y_data = df_filtered["target"].values
-y_binary = (y_data == CLASS_TO_REPEAT).astype(int)
-
-# Параметры кросс-валидации
-cv_folds = [3, 5, 10, 20, 50, 100]
-
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-
-# Для ROC кривых
-for n_folds in cv_folds:
-    tprs = []
-    base_fpr = np.linspace(0, 1, 100)
-    auc_scores = []
-    
-    cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
-    
-    for train_idx, test_idx in cv.split(X_data, y_binary):
-        X_train, X_test = X_data[train_idx], X_data[test_idx]
-        y_train, y_test = y_binary[train_idx], y_binary[test_idx]
-        
-        lda = LinearDiscriminantAnalysis()
-        lda.fit(X_train, y_train)
-        
-        y_score = lda.predict_proba(X_test)[:, 1]
-        
-        fpr, tpr, _ = roc_curve(y_test, y_score)
-        tpr_interp = np.interp(base_fpr, fpr, tpr)
-        tpr_interp[0] = 0.0
-        tprs.append(tpr_interp)
-        
-        auc_scores.append(auc(fpr, tpr))
-    
-    tprs = np.array(tprs)
-    mean_tpr = tprs.mean(axis=0)
-    std_tpr = tprs.std(axis=0)
-    
-    tprs_upper = np.minimum(mean_tpr + 1.96 * std_tpr, 1)
-    tprs_lower = np.maximum(mean_tpr - 1.96 * std_tpr, 0)
-    
-    mean_auc = np.mean(auc_scores)
-    
-    ax1.plot(base_fpr, mean_tpr, label=f"{n_folds}-fold (AUC={mean_auc:.3f})")
-    ax1.fill_between(base_fpr, tprs_lower, tprs_upper, alpha=0.1)
-
-ax1.plot([0, 1], [0, 1], "k--", alpha=0.5)
-ax1.set_xlim([0.0, 1.0])
-ax1.set_ylim([0.0, 1.05])
-ax1.set_xlabel("False Positive Rate")
-ax1.set_ylabel("True Positive Rate")
-ax1.set_title("ROC кривые с кросс-валидацией (df10)")
-ax1.legend(loc="lower right")
-ax1.grid(True, alpha=0.3)
-
-# Для PR кривых
-for n_folds in cv_folds:
-    precisions_list = []
-    base_recall = np.linspace(0, 1, 100)
-    auprc_scores = []
-    
-    cv = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
-    
-    for train_idx, test_idx in cv.split(X_data, y_binary):
-        X_train, X_test = X_data[train_idx], X_data[test_idx]
-        y_train, y_test = y_binary[train_idx], y_binary[test_idx]
-        
-        lda = LinearDiscriminantAnalysis()
-        lda.fit(X_train, y_train)
-        
-        y_score = lda.predict_proba(X_test)[:, 1]
-        
-        precision, recall, _ = precision_recall_curve(y_test, y_score)
-        precision_interp = np.interp(base_recall, recall[::-1], precision[::-1])
-        precisions_list.append(precision_interp)
-        
-        auprc_scores.append(auc(recall, precision))
-    
-    precisions_list = np.array(precisions_list)
-    mean_precision = precisions_list.mean(axis=0)
-    std_precision = precisions_list.std(axis=0)
-    
-    precision_upper = np.minimum(mean_precision + 1.96 * std_precision, 1)
-    precision_lower = np.maximum(mean_precision - 1.96 * std_precision, 0)
-    
-    mean_auprc = np.mean(auprc_scores)
-    
-    ax2.plot(base_recall, mean_precision, label=f"{n_folds}-fold (AUPRC={mean_auprc:.3f})")
-    ax2.fill_between(base_recall, precision_lower, precision_upper, alpha=0.1)
-
-baseline = np.mean(y_binary)
-ax2.axhline(y=baseline, color="r", linestyle="--", label=f"Baseline = {baseline:.3f}")
-ax2.set_xlim([0.0, 1.0])
-ax2.set_ylim([0.0, 1.05])
-ax2.set_xlabel("Recall")
-ax2.set_ylabel("Precision")
-ax2.set_title("PR кривые с кросс-валидацией (df10)")
-ax2.legend(loc="upper right")
-ax2.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.savefig("cross_validation_curves.png", dpi=300, bbox_inches="tight")
-#plt.show()
-
-'''
-# =============================================================================
-# ЗАДАНИЕ 2.9 - LDA с разным количеством признаков
-# =============================================================================
-print("\n=== ЗАДАНИЕ 2.9 - LDA с разным количеством признаков ===")
-
-feature_counts = [2, 4, 8, 16]
-df1_data = datasets["df1"]
-df_filtered = df1_data[df1_data["target"].isin(selected_classes)].copy()
-
-y_binary = (df_filtered["target"] == CLASS_TO_REPEAT).astype(int)
-
-fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-axes = axes.flatten()
-
-for i, n_features in enumerate(feature_counts):
-    if i >= len(axes):
-        break
-        
-    # Выбираем первые n_features признаков
-    selected_feature_subset = [f"feature_{j+1}" for j in range(n_features)]
-    X_data = df_filtered[selected_feature_subset].values
-    
-    # Бутстреп ROC кривых
-    lda = LinearDiscriminantAnalysis()
-    fpr, mean_tpr, tpr_lower, tpr_upper, auc_scores = bootstrap_roc_curve(
-        X_data, y_binary, lda, n_bootstrap=100, target_class=1)
-    
-    mean_auc = np.mean(auc_scores)
-    auc_ci = np.percentile(auc_scores, [2.5, 97.5])
-    
-    # Визуализация
-    axes[i].plot(fpr, mean_tpr, color="b", label=f"ROC (AUC = {mean_auc:.3f})")
-    axes[i].fill_between(fpr, tpr_lower, tpr_upper, color="grey", alpha=0.3,
-                        label="95% доверительный интервал")
-    axes[i].plot([0, 1], [0, 1], "k--", alpha=0.5)
-    
-    axes[i].set_xlim([0.0, 1.0])
-    axes[i].set_ylim([0.0, 1.05])
-    axes[i].set_xlabel("False Positive Rate")
-    axes[i].set_ylabel("True Positive Rate")
-    axes[i].set_title(f"LDA с {n_features} признаками\nAUC: {mean_auc:.3f} [{auc_ci[0]:.3f}, {auc_ci[1]:.3f}]")
-    axes[i].legend(loc="lower right")
-    axes[i].grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.savefig("lda_different_features.png", dpi=300, bbox_inches="tight")
-#plt.show()
-
-# =============================================================================
-# ЗАДАНИЕ 2.10* - QDA анализ
-# =============================================================================
-print("\n=== ЗАДАНИЕ 2.10* - QDA анализ ===")
-
-# Визуализация QDA для разных датасетов
-fig, axes = plt.subplots(3, 3, figsize=(20, 15))
-axes = axes.flatten()
-
-qda_times = {}
-
-for i, df_name in enumerate(DATASET_NAMES):
-    if df_name not in datasets or i >= len(axes):
-        continue
-        
-    df = datasets[df_name]
-    df_filtered = df[df["target"].isin(selected_classes)].copy()
-    
-    X_plot = df_filtered[selected_features].values
-    y_plot = df_filtered["target"].values
-    
-    # Время начала обучения QDA
-    start_time = time.time()
-    
-    # Обучаем QDA
-    qda = QuadraticDiscriminantAnalysis()
-    qda.fit(X_plot, y_plot)
-    
-    # Время окончания обучения
-    end_time = time.time()
-    qda_times[df_name] = end_time - start_time
-    
-    # Создаем сетку для построения решающей границы
-    x_min, x_max = X_plot[:, 0].min() - 1, X_plot[:, 0].max() + 1
-    y_min, y_max = X_plot[:, 1].min() - 1, X_plot[:, 1].max() + 1
-    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200),
-                         np.linspace(y_min, y_max, 200))
-    
-    # Предсказываем для всех точек сетки
-    Z = qda.predict(np.c_[xx.ravel(), yy.ravel()])
-    Z = Z.reshape(xx.shape)
-    
-    # Визуализация
-    contour = axes[i].contourf(xx, yy, Z, alpha=0.3, cmap=plt.cm.RdYlBu)
-    scatter = axes[i].scatter(X_plot[:, 0], X_plot[:, 1], c=y_plot, 
-                             cmap=plt.cm.RdYlBu, edgecolors="black", s=30)
-    
-    axes[i].set_title(f"QDA - {df_name}\nВремя: {qda_times[df_name]:.4f}с", fontsize=12)
-    axes[i].set_xlabel(selected_features[0])
-    axes[i].set_ylabel(selected_features[1])
-
-plt.tight_layout()
-plt.savefig("qda_decision_boundaries.png", dpi=300, bbox_inches="tight")
-#plt.show()
-
-print("Время выполнения QDA для разных датасетов:")
-for df_name, t in qda_times.items():
-    print(f"{df_name}: {t:.4f} секунд")
-
-# ROC кривые для QDA
-fig, axes = plt.subplots(3, 3, figsize=(20, 15))
-axes = axes.flatten()
-
-qda_roc_data = {}
-
-for i, df_name in enumerate(DATASET_NAMES):
-    if df_name not in datasets or i >= len(axes):
-        continue
-        
-    df = datasets[df_name]
-    df_filtered = df[df["target"].isin(selected_classes)].copy()
-    
-    X_data = df_filtered[selected_features].values
-    y_data = df_filtered["target"].values
-    y_binary = (y_data == CLASS_TO_REPEAT).astype(int)
-    
-    # Бутстреп ROC кривых для QDA
-    qda = QuadraticDiscriminantAnalysis()
-    fpr, mean_tpr, tpr_lower, tpr_upper, auc_scores = bootstrap_roc_curve(
-        X_data, y_binary, qda, n_bootstrap=100, target_class=1)
-    
-    mean_auc = np.mean(auc_scores)
-    auc_ci = np.percentile(auc_scores, [2.5, 97.5])
-    
-    qda_roc_data[df_name] = {
-        "mean_auc": mean_auc,
-        "auc_ci": auc_ci
-    }
-    
-    # Визуализация ROC кривой
-    axes[i].plot(fpr, mean_tpr, color="b", label=f"QDA ROC (AUC = {mean_auc:.3f})")
-    axes[i].fill_between(fpr, tpr_lower, tpr_upper, color="grey", alpha=0.3,
-                        label="95% доверительный интервал")
-    axes[i].plot([0, 1], [0, 1], "k--", alpha=0.5)
-    
-    axes[i].set_xlim([0.0, 1.0])
-    axes[i].set_ylim([0.0, 1.05])
-    axes[i].set_xlabel("False Positive Rate")
-    axes[i].set_ylabel("True Positive Rate")
-    axes[i].set_title(f"QDA ROC - {df_name}\nAUC: {mean_auc:.3f} [{auc_ci[0]:.3f}, {auc_ci[1]:.3f}]")
-    axes[i].legend(loc="lower right")
-    axes[i].grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.savefig("qda_roc_curves.png", dpi=300, bbox_inches="tight")
-#plt.show()
-
-print("Сравнение LDA и QDA:")
-print("Датасет\t\tLDA AUC\t\tQDA AUC")
-for df_name in DATASET_NAMES:
-    if df_name in roc_auc_data and df_name in qda_roc_data:
-        lda_auc = roc_auc_data[df_name]["mean_auc"]
-        qda_auc = qda_roc_data[df_name]["mean_auc"]
-        print(f"{df_name}\t\t{lda_auc:.3f}\t\t{qda_auc:.3f}")
-
-print("\n=== Анализ завершен ===")
-'''
