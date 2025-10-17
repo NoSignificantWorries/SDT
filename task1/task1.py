@@ -297,7 +297,7 @@ plotter.save("res/hists.png", dpi=200)
 plotter.tight_layout()
 
 # #%% [markdown]
-# ### **Stage 3** (task [4]): _Correlation matrixes_
+# ### **Stage3** (task [4]): _Correlation matrixes_
 
 # #%%
 

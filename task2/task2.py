@@ -1,6 +1,12 @@
+# #%% [markdown]
+# # **Task1**
+
+# #%% [markdown]
+# ### **Stage 0:** _Importing libs. Adding plotter class and sys functions_
+
 # #%%
 import os
-import sys
+# import sys
 import time
 import pickle
 from typing import Tuple, Optional, Any
@@ -23,7 +29,10 @@ from sklearn.decomposition import PCA
 from sklearn.datasets import make_blobs
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
 from sklearn.metrics import roc_curve, auc, precision_recall_curve
-from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.model_selection import StratifiedKFold
+
+# #%% [markdown]
+# ##### **_Constants_**
 
 # #%%
 DPI = 150
@@ -40,6 +49,9 @@ EDGECOLOR = "#11111b"
 STYLES = ["o", "s", "^"]
 # MAKE_16x16 = True
 MAKE_16x16 = False
+
+# #%% [markdown]
+# ##### **_Plotter_**
 
 # #%%
 
@@ -157,6 +169,8 @@ class Plotter:
     def show(self) -> None:
         self.fig.show()
 
+# #%% [markdown]
+# ##### **_Sys functions_**
 
 # #%%
 def data_stats(data1, data2) -> Any:
@@ -230,6 +244,11 @@ def select_unique(arr, n):
     indices = np.linspace(0, len(unique_sorted)-1, n, dtype=int)
     return indices
 
+# #%% [markdown]
+# ### **Stage 1** (tasks [1] [2]): _Creating base dataset and dublicates_
+
+# #%% [markdown]
+# ##### **_Function and parameters_**
 
 # #%%
 
@@ -243,20 +262,27 @@ COLUMNS = [f"feature_{i+1}" for i in range(n_features)]
 
 @cache_data("cache/df1_main.pkl")
 def create_dataframe(n_samples, n_features, n_classes):
-    X1, y1 = make_blobs(n_samples=n_samples * (n_classes - 1), 
+    X1, y1 = make_blobs(n_samples=n_samples, 
                         n_features=n_features, 
-                        centers=2,
+                        centers=1,
                         cluster_std=2.5,
+                        center_box=(-7, -8),
                         random_state=42)
     X2, y2 = make_blobs(n_samples=n_samples, 
                         n_features=n_features, 
                         centers=1,
+                        cluster_std=2.5,
+                        center_box=(-5, -5),
+                        random_state=42)
+    X3, y3 = make_blobs(n_samples=n_samples, 
+                        n_features=n_features, 
+                        centers=1,
                         cluster_std=1.6,
-                        center_box=(10.0, 15.0),
+                        center_box=(5.0, 5.0),
                         random_state=42)
 
-    X = np.vstack([X1, X2])
-    y = np.hstack([y1, np.full(y2.shape, 2)])
+    X = np.vstack([X1, X2, X3])
+    y = np.hstack([y1, np.full(y2.shape, 1), np.full(y3.shape, 2)])
 
     df = pd.DataFrame(X, columns=COLUMNS)
     df["target"] = y
@@ -425,13 +451,12 @@ DATASET_NAMES = list(datasets.keys())
 
 # #%%
 
-if MAKE_16x16:
-    plotter = Plotter(nrows=16, ncols=16, figsize=(50, 50))
+plotter = Plotter(nrows=16, ncols=16, figsize=(50, 50))
 
-    plotter.dataset_visual(df1[COLUMNS], df1["target"], COLORS, STYLES, EDGECOLOR, alpha=0.6)
+plotter.dataset_visual(df1[COLUMNS], df1["target"], COLORS, STYLES, EDGECOLOR, alpha=0.6)
 
-    plotter.tight_layout()
-    plotter.save("res/df1_16x16.png", dpi=200)
+plotter.tight_layout()
+plotter.save("res/df1_16x16.png", dpi=200)
 
 # #%%
 
@@ -614,7 +639,12 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
 # #%%
 
 def make_stats_for_model(plotter, model, name, datasets, features, classes, n_bootstraps=(1000, 10), confidence_level=0.95, no_proj=False):
-    centers_data = []
+    @cache_data("cache/centers_data.pkl")
+    def get_centers_data():
+        centers_data = []
+        return centers_data
+
+    centers_data = get_centers_data()
     lda_times = {}
     for i, dataset in enumerate(DATASET_NAMES):
         if dataset not in datasets:
@@ -624,14 +654,19 @@ def make_stats_for_model(plotter, model, name, datasets, features, classes, n_bo
         
         df_filtered, X_plot, y_plot = filter_data(df, classes, features)
 
-        centers_data.append(calc_mass_points(df_filtered, dataset, features))
+        if not bool(centers_data):
+            centers_data.append(calc_mass_points(df_filtered, dataset, features))
         
         model, time_elapsed = fit_model(f"cache/{name}_{classes[0]}_{classes[1]}_{features[0]}_{features[1]}_{dataset}.pkl",
                                         model, X_plot, y_plot)
 
         lda_times[dataset] = time_elapsed
         
-        roc_pr_stat = ROC_PR_calc_with_area(model, X_plot, y_plot, n_bootstraps=(n_bootstraps[0] if len(y_plot) < 1000000 else n_bootstraps[1]), no_proj=no_proj)
+        @cache_data(f"cache/{name}_roc_pr_{classes[0]}_{classes[1]}_{features[0]}_{features[1]}_{dataset}.pkl")
+        def get_roc_pr():
+            return ROC_PR_calc_with_area(model, X_plot, y_plot, n_bootstraps=(n_bootstraps[0] if len(y_plot) < 1000000 else n_bootstraps[1]), no_proj=no_proj)
+        
+        roc_pr_stat = get_roc_pr()
 
         plotter.set_position(idx=i * 3 + 1)
         
@@ -701,7 +736,11 @@ for i, current_n_features in enumerate([2, 4, 8, 16]):
     model, time_elapsed = fit_model(f"cache/lda_many_{selected_classes[0]}_{selected_classes[1]}_{current_n_features}.pkl",
                                     LinearDiscriminantAnalysis(), X_plot, y_plot)
 
-    roc_pr_stat = ROC_PR_calc_with_area(model, X_plot, y_plot, n_bootstraps=(n_bootstraps[0] if len(y_plot) < 1000000 else n_bootstraps[1]))
+    @cache_data(f"cache/lda_many_roc_pr_{classes[0]}_{classes[1]}.pkl")
+    def get_roc_pr():
+        return ROC_PR_calc_with_area(model, X_plot, y_plot, n_bootstraps=(n_bootstraps[0] if len(y_plot) < 1000000 else n_bootstraps[1]))
+    
+    roc_pr_stat = get_roc_pr()
 
     draw_curve(plotter, i * 2,
                roc_pr_stat["fpr"], roc_pr_stat["tpr"], roc_pr_stat["tpr_mean"],
