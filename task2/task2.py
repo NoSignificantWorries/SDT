@@ -1,10 +1,10 @@
-# #%% [markdown]
-# # **Task1**
+# %% [markdown]
+# # **Task2**
 
-# #%% [markdown]
+# %% [markdown]
 # ### **Stage 0:** _Importing libs. Adding plotter class and sys functions_
 
-# #%%
+# %%
 import os
 # import sys
 import time
@@ -31,10 +31,10 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticD
 from sklearn.metrics import roc_curve, auc, precision_recall_curve
 from sklearn.model_selection import StratifiedKFold
 
-# #%% [markdown]
+# %% [markdown]
 # ##### **_Constants_**
 
-# #%%
+# %%
 DPI = 150
 SAVE_DIR="res"
 COLORS = ["#e78284", "#a6d189", "#b4befe"]
@@ -50,10 +50,10 @@ STYLES = ["o", "s", "^"]
 # MAKE_16x16 = True
 MAKE_16x16 = False
 
-# #%% [markdown]
+# %% [markdown]
 # ##### **_Plotter_**
 
-# #%%
+# %%
 
 class Plotter:
     def __init__(self, nrows: int = 1, ncols: int = 1, figsize: Tuple[int, int] = (6, 6)) -> None:
@@ -169,10 +169,10 @@ class Plotter:
     def show(self) -> None:
         self.fig.show()
 
-# #%% [markdown]
+# %% [markdown]
 # ##### **_Sys functions_**
 
-# #%%
+# %%
 def data_stats(data1, data2) -> Any:
     Pearson_v, Pearson_pv = scipy.stats.pearsonr(data1, data2)
     spearman_v, spearman_pv = scipy.stats.spearmanr(data1, data2)
@@ -196,7 +196,7 @@ def get_cov_matrixes(df, features, classes):
     
     return stats
 
-# #%%
+# %%
 
 def cache_data(cache_file):
     def decorator(func):
@@ -244,13 +244,13 @@ def select_unique(arr, n):
     indices = np.linspace(0, len(unique_sorted)-1, n, dtype=int)
     return indices
 
-# #%% [markdown]
-# ### **Stage 1** (tasks [1] [2]): _Creating base dataset and dublicates_
+# %% [markdown]
+# ### **Stage 1** (tasks [1] [2] [3]): _Creating base dataset and dublicates_
 
-# #%% [markdown]
+# %% [markdown]
 # ##### **_Function and parameters_**
 
-# #%%
+# %%
 
 np.random.seed(42)
 n_samples = 1000
@@ -289,6 +289,10 @@ def create_dataframe(n_samples, n_features, n_classes):
 
     return df
 
+# %% [markdown]
+# ##### **_Creating dataframe_**
+
+ # %%
 
 df1 = create_dataframe(n_samples, n_features, n_classes)
 
@@ -298,8 +302,12 @@ print("Количество объектов в каждом классе:")
 print(df1["target"].value_counts().sort_index())
 print(df1.describe())
 
-# #%%
 
+# %% [markdown]
+# ##### **_Cov matrixes_**
+
+
+# %%
 @cache_data("cache/cov_matrixes.pkl")
 def get_cov(df):
     cov_matrixes = get_cov_matrixes(df, COLUMNS, [0, 1, 2])
@@ -336,7 +344,7 @@ for i in range(4):
 plotter.tight_layout()
 plotter.save("res/corelations.png")
 
-# #%%
+# %%
 
 all_data = []
 groups = []
@@ -366,7 +374,7 @@ for k in range(len(classes) + 1):
     
     all_data.append(data)
 
-# #%%
+# %%
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
@@ -375,19 +383,22 @@ pd.set_option('display.max_colwidth', None)
 print(f"Stats for {groups[0]}")
 all_data[0]
 
-# #%%
+# %%
 print(f"Stats for {groups[1]}")
 all_data[1]
 
-# #%%
+# %%
 print(f"Stats for {groups[2]}")
 all_data[2]
 
-# #%%
+# %%
 print(f"Stats for {groups[3]}")
 all_data[3]
 
-# #%%
+# %% [markdown]
+# ##### **_PCA for dataset_**
+
+# %%
 X = df1[COLUMNS]
 y = df1["target"]
 
@@ -409,7 +420,7 @@ plotter.legend()
 plotter.tight_layout()
 plotter.save(f"{SAVE_DIR}/data_PCA.png", dpi=DPI)
 
-# #%%
+# %%
 plotter = Plotter(nrows=4, ncols=4, figsize=(24, 24))
 
 for i, col in enumerate(COLUMNS):
@@ -425,7 +436,10 @@ for i, col in enumerate(COLUMNS):
 plotter.tight_layout()
 plotter.save(f"{SAVE_DIR}/df1_hists.png", dpi=DPI)
 
-# #%%
+# %% [markdown]
+# ##### **_Creating datasets with copies_**
+
+# %%
 CLASS_TO_REPEAT = 1
 repetition_factors = [2, 5, 10, 20, 50, 100, 1000, 10000]
 
@@ -449,7 +463,10 @@ for factor in repetition_factors:
 
 DATASET_NAMES = list(datasets.keys())
 
-# #%%
+# %% [markdown]
+# ##### **_All dataset visualization_**
+
+# %%
 
 plotter = Plotter(nrows=16, ncols=16, figsize=(50, 50))
 
@@ -458,7 +475,13 @@ plotter.dataset_visual(df1[COLUMNS], df1["target"], COLORS, STYLES, EDGECOLOR, a
 plotter.tight_layout()
 plotter.save("res/df1_16x16.png", dpi=200)
 
-# #%%
+# %% [markdown]
+# ### **Stage 2** (tasks [4] [5] [6] [7] [9]): _LDA with ROC and PR for different situations_
+
+# %% [markdown]
+# ##### **_Basic functions for further tasks_**
+
+# %%
 
 def fit_model(name, model, X, y):
     with timer() as t:
@@ -636,7 +659,10 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
     plotter.legend()
 
 
-# #%%
+# %% [markdown]
+# ##### **_Main train and stats calculating function_**
+
+# %%
 
 def make_stats_for_model(plotter, model, name, datasets, features, classes, n_bootstraps=(1000, 10), confidence_level=0.95, no_proj=False):
     @cache_data("cache/centers_data.pkl")
@@ -690,8 +716,13 @@ def make_stats_for_model(plotter, model, name, datasets, features, classes, n_bo
     centers_df = pd.DataFrame(centers_data)
     print("Mass centers:")
     print(centers_df)
+    
+    return lda_times
 
-# #%%
+# %% [markdown]
+# ##### **_LDA 1_**
+
+# %%
 selected_classes = [0, 1]
 # selected_features = [COLUMNS[0], COLUMNS[3]]
 selected_features = [COLUMNS[6], COLUMNS[8]]
@@ -704,7 +735,10 @@ make_stats_for_model(plotter, LinearDiscriminantAnalysis(), "lda", datasets, sel
 plotter.tight_layout()
 plotter.save("res/LDA_ROC_PR_1.png", dpi=DPI)
 
-# #%%
+# %% [markdown]
+# ##### **_LDA 2_**
+
+# %%
 
 selected_classes = [1, 2]
 # selected_features = [COLUMNS[0], COLUMNS[3]]
@@ -718,7 +752,10 @@ make_stats_for_model(plotter, LinearDiscriminantAnalysis(), "lda", datasets, sel
 plotter.tight_layout()
 plotter.save("res/LDA_ROC_PR_2.png", dpi=DPI)
 
-# #%%
+# %% [markdown]
+# ##### **_LDA for all features_**
+
+# %%
 
 confidence_level = 0.95
 n_bootstraps = (1000, 10)
@@ -760,7 +797,10 @@ for i, current_n_features in enumerate([2, 4, 8, 16]):
 plotter.tight_layout()
 plotter.save("res/ROC_PR_many_features.png", dpi=DPI)
 
-# #%%
+# %% [markdown]
+# ### **Stage 3** (task [8]): _LDA k-folds validation_
+
+# %%
 
 confidence_level = 0.95
 selected_classes = [0, 1]
@@ -850,7 +890,10 @@ for i, k in enumerate(k_folds):
 plotter.tight_layout()
 plotter.save("res/k-fold_ROC_PR.png", dpi=DPI)
 
-# #%%
+# %% [markdown]
+# ### **Stage 4** (task [10]): _QDA_
+
+# %%
 selected_classes = [0, 1]
 # selected_features = [COLUMNS[0], COLUMNS[3]]
 selected_features = [COLUMNS[6], COLUMNS[8]]
