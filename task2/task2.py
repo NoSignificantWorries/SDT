@@ -616,10 +616,13 @@ def ROC_PR_calc_with_area(model, X, y, roc=True, pr=True, n_bootstraps=1000, con
     return res
 
 
-def draw_curve(plotter, idx, ox, oy_origin, oy_mean, oy_lower, oy_upper, score, score_mean, area, conf_level, name, labels, line=([0, 1], [0, 1])):
+def draw_curve(plotter, idx, ox, oy_origin, oy_mean, oy_lower, oy_upper, score, score_mean, area, conf_level, name, labels):
     plotter.set_position(idx=idx)
+    
+    line_ = [(ox[0], ox[-1]),
+             (oy_mean[0], oy_mean[-1])]
 
-    plotter.plot(*line, color="red", alpha=0.5, linestyle="--")
+    plotter.plot(*line_, color="red", alpha=0.5, linestyle="--")
     plotter.fill_between(ox, oy_lower, oy_upper, color="green", alpha=0.3, label=f"{name} CI for {conf_level * 100}% ({area:.6f})")
     plotter.plot(ox, oy_mean, color="blue", linewidth=2, label=f"{name}-curve mean ({score_mean:.6f})")
     plotter.plot(ox, oy_origin, color="red", linewidth=1, label=f"{name}-curve origin ({score:.6f})")
@@ -708,8 +711,7 @@ def make_stats_for_model(plotter, model, name, datasets, features, classes, n_bo
                    roc_pr_stat["precision_lower"], roc_pr_stat["precision_upper"],
                    roc_pr_stat["auprc"], roc_pr_stat["pr_score_mean"],
                    roc_pr_stat["precision_area"],
-                   confidence_level, "PR", ("recall", "precision", f"PR-curve for {dataset}"), line=([0, 1], [1, 0]))
-        plotter.invert_xaxis()
+                   confidence_level, "PR", ("recall", "precision", f"PR-curve for {dataset}"))
 
         draw_model(plotter, i * 3, 500, model, X_plot, y_plot, centers_data[-1], (features[0], features[1], dataset))
 
@@ -791,8 +793,7 @@ for i, current_n_features in enumerate([2, 4, 8, 16]):
                roc_pr_stat["precision_lower"], roc_pr_stat["precision_upper"],
                roc_pr_stat["auprc"], roc_pr_stat["pr_score_mean"],
                roc_pr_stat["precision_area"],
-               confidence_level, "PR", ("recall", "precision", f"PR-curve for {current_n_features} features"), line=([0, 1], [1, 0]))
-    plotter.invert_xaxis()
+               confidence_level, "PR", ("recall", "precision", f"PR-curve for {current_n_features} features"))
 
 plotter.tight_layout()
 plotter.save("res/ROC_PR_many_features.png", dpi=DPI)
@@ -869,7 +870,7 @@ for i, k in enumerate(k_folds):
     
     plotter.set_position(idx=i * 2)
 
-    plotter.plot([0, 1], [0, 1], color="red", linestyle="--")
+    plotter.plot([mean_fpr[0], mean_fpr[-1]], [mean_tpr[0], mean_tpr[-1]], color="red", linestyle="--")
     plotter.fill_between(mean_fpr, tpr_lower, tpr_upper, color="green", alpha=0.3, label=f"ROC CI for {confidence_level * 100}%")
     plotter.plot(mean_fpr, mean_tpr, color="blue", linewidth=2, label=f"ROC-curve mean ({np.mean(all_auc_roc):.6f})")
     plotter.grid(True, alpha=0.3)
@@ -878,14 +879,12 @@ for i, k in enumerate(k_folds):
     
     plotter.set_position(idx=i * 2 + 1)
     
-    plotter.plot([1, 0], [0, 1], color="red", linestyle="--")
+    plotter.plot([mean_recall[0], mean_recall[-1]], [mean_precision[0], mean_precision[-1]], color="red", linestyle="--")
     plotter.fill_between(mean_recall, precision_lower, precision_upper, color="green", alpha=0.3, label=f"PR CI for {confidence_level * 100}%")
     plotter.plot(mean_recall, mean_precision, color="blue", linewidth=2, label=f"PR-curve mean ({np.mean(all_auc_prc):.6f})")
     plotter.grid(True, alpha=0.3)
     plotter.legend()
     plotter.labels("Recall", "Precision", f"PR-curve for {k}-folds")
-
-    plotter.invert_xaxis()
 
 plotter.tight_layout()
 plotter.save("res/k-fold_ROC_PR.png", dpi=DPI)
