@@ -598,32 +598,33 @@ def fit_model(name, model, X, y):
 
 
 def filter_data(df, classes, features):
+    classes_remap = {classes[0]: 0, classes[1]: 1}
     df_filtered = df[df["target"].isin(classes)].copy()
-    df_filtered["target"] = pd.factorize(df_filtered["target"])[0]
+    df_filtered["target"] = df_filtered["target"].map(classes_remap)
     X, y = df_filtered[features].values, df_filtered["target"].values
 
     return df_filtered, X, y
 
 
 def calc_mass_points(df, name, features):
-    centers = {}
+    centers = []
     classes = df["target"].unique()
+    
+    res = {
+        "dataset": name,
+        "overall_center": df[features].mean().values,
+    }
+
     for class_label in classes:
         class_data = df[df["target"] == class_label][features]
         center = class_data.mean().values
-        centers[class_label] = center
 
-    overall_center = df[features].mean().values
+        centers.append(center)
+        res[f"center_class_{class_label}"] = center
 
-    midpoint = (centers[classes[0]] + centers[classes[1]]) / 2
+    res["midpoint"] = np.mean(np.array(centers), axis=0)
 
-    return {
-        "dataset": name,
-        "center_class_0": centers[classes[0]],
-        "center_class_1": centers[classes[1]],
-        "overall_center": overall_center,
-        "midpoint": midpoint,
-    }
+    return res
 
 
 def ROC_PR_calc(model, X, y, roc=True, pr=True, no_proj=False):
@@ -751,7 +752,7 @@ def draw_curve(
 ):
     plotter.set_position(idx=idx)
 
-    plotter.plot(*line, color="red", alpha=0.5, linestyle="--")
+    plotter.plot(*line, color="red", alpha=0.5, linestyle="--", label=labels[-1])
     plotter.fill_between(
         ox,
         oy_lower,
@@ -776,11 +777,11 @@ def draw_curve(
     )
     plotter.grid(True, alpha=0.3)
     plotter.legend()
-    plotter.labels(*labels)
+    plotter.labels(*labels[:-1])
 
 
 def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_max=1000):
-    plotter.set_position(idx=idx)
+    _, cls_cnts = np.unique(y, return_counts=True)
 
     x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
     y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
@@ -788,9 +789,10 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
         np.linspace(x_min, x_max, size), np.linspace(y_min, y_max, size)
     )
 
-    # Z = model.predict(np.c_[xx.ravel(), yy.ravel()])
-    Z = model.predict_proba(np.c_[xx.ravel(), yy.ravel()])[..., 1]
+    Z = model.predict(np.c_[xx.ravel(), yy.ravel()])
     Z = Z.reshape(xx.shape)
+
+    plotter.set_position(idx=idx)
 
     plotter.contourf(xx, yy, Z, alpha=0.3, cmap="bwr")
     selected_indexes = select_unique(X[:, 0], scatter_max)
@@ -799,8 +801,10 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
         X[:, 1][selected_indexes],
         c=y[selected_indexes],
         cmap="bwr",
+        alpha=0.4,
         edgecolors=EDGECOLOR,
         s=30,
+        label="Objects"
     )
 
     plotter.plot(
@@ -812,20 +816,20 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
     plotter.scatter(
         centers_info["center_class_0"][0],
         centers_info["center_class_0"][1],
-        c="red",
+        c="blue",
         marker="X",
         s=250,
-        label="Center Class 0",
+        label=f"Center Class 0 ({cls_cnts[0]})",
         alpha=0.8,
         edgecolors=EDGECOLOR,
     )
     plotter.scatter(
         centers_info["center_class_1"][0],
         centers_info["center_class_1"][1],
-        c="blue",
+        c="red",
         marker="X",
         s=250,
-        label="Center Class 1",
+        label=f"Center Class 1 ({cls_cnts[1]})",
         alpha=0.8,
         edgecolors=EDGECOLOR,
     )
@@ -851,7 +855,17 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
     )
 
     plotter.labels(*labels)
-    plotter.legend()
+
+    Z_proba = model.predict_proba(np.c_[xx.ravel(), yy.ravel()])[..., 1]
+    # Z_proba = model.predict_proba(np.c_[xx.ravel(), yy.ravel()])
+    Z_proba = Z_proba.reshape(xx.shape)
+
+    plotter.set_position(idx=idx + 1)
+
+    plotter.pcolormesh(xx, yy, Z_proba, cmap='rainbow', vmin=0.0, vmax=1.0, zorder=0.0)
+    plotter.contour(xx, yy, Z_proba, [0.5], linewidths=2.0, colors='red', label="Decision curve")
+
+    plotter.labels(*labels[:-1], "Predict proba")
 
 
 # %% [markdown]
@@ -914,11 +928,11 @@ def make_stats_for_model(
 
         roc_pr_stat = get_roc_pr()
 
-        plotter.set_position(idx=i * 3 + 1)
+        # plotter.set_position(idx=i * 4 + 1)
 
         draw_curve(
             plotter,
-            i * 3 + 1,
+            i * 4 + 2,
             roc_pr_stat["fpr"],
             roc_pr_stat["tpr"],
             roc_pr_stat["tpr_mean"],
@@ -929,14 +943,15 @@ def make_stats_for_model(
             roc_pr_stat["tpr_area"],
             confidence_level,
             "ROC",
-            ("FPR", "TPR", f"ROC-curve for {dataset}"),
+            ("FPR", "TPR", f"ROC-curve for {dataset}", "Baseline"),
             ([0, 1], [0, 1]),
         )
 
         _, cnts = np.unique(y_plot, return_counts=True)
+        pr_baseline = cnts[1] / sum(cnts)
         draw_curve(
             plotter,
-            i * 3 + 2,
+            i * 4 + 3,
             roc_pr_stat["recall"],
             roc_pr_stat["precision"],
             roc_pr_stat["precision_mean"],
@@ -947,13 +962,13 @@ def make_stats_for_model(
             roc_pr_stat["precision_area"],
             confidence_level,
             "PR",
-            ("recall", "precision", f"PR-curve for {dataset}"),
-            ([0, 1], [cnts[1] / sum(cnts)] * 2),
+            ("recall", "precision", f"PR-curve for {dataset}", f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}"),
+            ([0, 1], [pr_baseline] * 2),
         )
 
         draw_model(
             plotter,
-            i * 3,
+            i * 4,
             500,
             model,
             X_plot,
@@ -973,12 +988,12 @@ def make_stats_for_model(
 #  ##### **_LDA 1_**
 
 # %%
-selected_classes = [0, 1]
+selected_classes = [1, 0]
 # selected_features = [COLUMNS[0], COLUMNS[3]]
 selected_features = [COLUMNS[6], COLUMNS[8]]
 # selected_features = [COLUMNS[5], COLUMNS[15]]
 
-plotter = Plotter(nrows=len(datasets), ncols=3, figsize=(16, 32))
+plotter = Plotter(nrows=len(datasets), ncols=4, figsize=(20, 32))
 
 times = make_stats_for_model(
     plotter,
@@ -1006,7 +1021,7 @@ selected_classes = [1, 2]
 selected_features = [COLUMNS[6], COLUMNS[8]]
 # selected_features = [COLUMNS[5], COLUMNS[15]]
 
-plotter = Plotter(nrows=len(datasets), ncols=3, figsize=(16, 32))
+plotter = Plotter(nrows=len(datasets), ncols=4, figsize=(20, 32))
 
 times = make_stats_for_model(
     plotter,
@@ -1031,7 +1046,7 @@ plotter.save("res/LDA_ROC_PR_2.png", dpi=DPI)
 
 confidence_level = 0.95
 n_bootstraps = (1000, 10)
-selected_classes = [0, 1]
+selected_classes = [1, 0]
 
 plotter = Plotter(nrows=4, ncols=2, figsize=(16, 24))
 
@@ -1075,11 +1090,12 @@ for i, current_n_features in enumerate([2, 4, 8, 16]):
         roc_pr_stat["tpr_area"],
         confidence_level,
         "ROC",
-        ("FPR", "TPR", f"ROC-curve for {current_n_features} features"),
+        ("FPR", "TPR", f"ROC-curve for {current_n_features} features", "Baseline"),
         ([0, 1], [0, 1]),
     )
 
     _, cnts = np.unique(y_plot, return_counts=True)
+    pr_baseline = cnts[1] / sum(cnts)
     draw_curve(
         plotter,
         i * 2 + 1,
@@ -1093,8 +1109,8 @@ for i, current_n_features in enumerate([2, 4, 8, 16]):
         roc_pr_stat["precision_area"],
         confidence_level,
         "PR",
-        ("recall", "precision", f"PR-curve for {current_n_features} features"),
-        ([0, 1], [cnts[1] / sum(cnts)] * 2),
+        ("recall", "precision", f"PR-curve for {current_n_features} features", f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}"),
+        ([0, 1], [pr_baseline] * 2),
     )
 
 plotter.tight_layout()
@@ -1107,7 +1123,7 @@ plotter.save("res/ROC_PR_many_features.png", dpi=DPI)
 # %%
 
 confidence_level = 0.95
-selected_classes = [0, 1]
+selected_classes = [1, 0]
 df = datasets["df10"]
 # selected_features = COLUMNS
 # selected_features = [COLUMNS[5], COLUMNS[15]]
@@ -1213,11 +1229,13 @@ for i, k in enumerate(k_folds):
     plotter.set_position(idx=i * 2 + 1)
 
     _, cnts = np.unique(y, return_counts=True)
+    pr_baseline = cnts[1] / sum(cnts)
     plotter.plot(
         [0, 1],
-        [cnts[1] / sum(cnts)] * 2,
+        [pr_baseline] * 2,
         color="red",
         linestyle="--",
+        label=f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}"
     )
     plotter.fill_between(
         mean_recall,
@@ -1246,12 +1264,12 @@ plotter.save("res/k-fold_ROC_PR.png", dpi=DPI)
 #  ### **Stage 4** (task [10]): _QDA_
 
 # %%
-selected_classes = [0, 1]
+selected_classes = [1, 0]
 # selected_features = [COLUMNS[0], COLUMNS[3]]
 selected_features = [COLUMNS[6], COLUMNS[8]]
 # selected_features = [COLUMNS[5], COLUMNS[15]]
 
-plotter = Plotter(nrows=len(datasets), ncols=3, figsize=(16, 32))
+plotter = Plotter(nrows=len(datasets), ncols=4, figsize=(20, 32))
 
 times = make_stats_for_model(
     plotter,
