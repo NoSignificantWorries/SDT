@@ -609,7 +609,7 @@ def filter_data(df, classes, features):
 def calc_mass_points(df, name, features):
     centers = []
     classes = df["target"].unique()
-    
+
     res = {
         "dataset": name,
         "overall_center": df[features].mean().values,
@@ -1190,12 +1190,12 @@ for i, k in enumerate(k_folds):
 
     precision_upper = np.minimum(
         mean_precision
-        + scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision,
+            + scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision,
         1,
     )
     precision_lower = np.maximum(
         mean_precision
-        - scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision,
+            - scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision,
         0,
     )
 
