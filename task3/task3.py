@@ -25,7 +25,7 @@ from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 import tqdm
 import scipy
 from sklearn.datasets import make_blobs
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import roc_curve, auc, precision_recall_curve
 from sklearn.model_selection import StratifiedKFold
 
@@ -405,8 +405,8 @@ if CALC_COV:
     groups = []
     classes = [0, 1, 2]
 
-    for k in range(len(classes) + 1):
-        group = classes[k - 1] if k > 0 else "all"
+    for k_log in range(len(classes) + 1):
+        group = classes[k_log - 1] if k_log > 0 else "all"
         groups.append(group)
         data = {
             "Pair": [],
@@ -415,7 +415,7 @@ if CALC_COV:
             "Spearman": [],
             "Spearman p-value": [],
         }
-        local_matrix = cov_matrixes[..., (k * 4) : (k + 1) * 4]
+        local_matrix = cov_matrixes[..., (k_log * 4) : (k_log + 1) * 4]
         elems = ["Pearson", "Pearson p-value", "Spearman", "Spearman p-value"]
         for i, iparam in enumerate(COLUMNS):
             for j, jparam in enumerate(COLUMNS):
@@ -517,19 +517,56 @@ def filter_data(df, classes, features):
     return df_filtered, X, y
 
 
-def sigmoid(x):
-    return 1 / (1 + np.exp(x))
+@cached()
+def calc_aucroc_with_ci(y_true, y_pred_proba, n_bootstraps=1000, confidence_level=0.95):
+    n_samples = len(y_true)
+    auc_scores = []
+    mean_fpr = np.linspace(0, 1, 100)
+    fpr_list = []
+    tpr_list = []
 
-
-def project_points(points, k, b):
-    k_2 = -1 / k
+    origin_fpr, origin_tpr, _ = roc_curve(y_true, y_pred_proba)
+    origin_auc = auc(origin_fpr, origin_tpr)
     
-    b_2 = points[..., 1] - k_2 * points[..., 0]
-
-    x_proj = (b_2 - b) / (k - k_2)
-    y_proj = k * x_proj + b
+    for i in tqdm.tqdm(range(n_bootstraps)):
+        indices = np.random.choice(range(n_samples), size=n_samples, replace=True)
+        
+        if len(np.unique(y_true[indices])) < 2:
+            continue
+            
+        fpr, tpr, levels = roc_curve(y_true[indices], y_pred_proba[indices])
+        tpr_interp = np.interp(mean_fpr, fpr, tpr)
+        tpr_interp[0] = 0.0
+        fpr_list.append(mean_fpr)
+        tpr_list.append(tpr_interp)
+        bootstrap_auc = auc(fpr, tpr)
+        auc_scores.append(bootstrap_auc)
     
-    return x_proj, y_proj
+    alpha = (1 - confidence_level) / 2
+    tpr_lower = np.percentile(tpr_list, 100 * alpha, axis=0)
+    tpr_upper = np.percentile(tpr_list, 100 * (1 - alpha), axis=0)
+    ci_lower = np.percentile(auc_scores, 100 * alpha)
+    ci_upper = np.percentile(auc_scores, 100 * (1 - alpha))
+    
+    mean_tpr = np.mean(np.array(tpr_list), axis=0)
+    mean_auc = auc(mean_fpr, mean_tpr)
+    
+    return origin_fpr, origin_tpr, origin_auc, mean_fpr, ci_lower, tpr_lower, ci_upper, tpr_upper, mean_tpr, mean_auc
+
+
+def decision_roc_point(pred, truth, threshold):
+    pred_binary = np.where(pred >= threshold, 1, 0)
+    
+    TP = np.sum((pred_binary == 1) & (truth == 1))
+    FP = np.sum((pred_binary == 1) & (truth == 0))
+    
+    P = np.sum(truth == 1)
+    N = np.sum(truth == 0)
+    
+    TPR = TP / P if P > 0 else 0
+    FPR = FP / N if N > 0 else 0
+    
+    return FPR, TPR
 
 
 data = make_AB(df1)
@@ -537,69 +574,113 @@ data = make_AB(df1)
 feature = COLUMNS[2]
 classes = [0, 1]
 
-nrows = len(data.keys())
+nrows = 1
 ncols = 3
 
-plotter = Plotter(nrows=nrows, ncols=ncols, figsize=(12, 30))
+log_threshold = 0.5
+confidence_level = 0.95
+
+plotters = [Plotter(nrows=nrows, ncols=ncols, figsize=(22, 8)) for _ in range(len(data.keys()))]
 
 for i, dataset in enumerate(data.keys()):
+    plotter = plotters[i]
+
     ldf, lX, ly = filter_data(data[dataset], classes, [feature])
+
+    class0_mask = ly == 0
+    class1_mask = ly == 1
     
     X_plot = np.linspace(lX.min(), lX.max(), 100)
 
     lin_reg = LinearRegression()
-    lin_reg.fit(lX, ly)
+    lin_reg.fit(lX.reshape(-1, 1), ly)
+    log_reg = LogisticRegression()
+    log_reg.fit(lX, ly)
     
-    beta = lin_reg.coef_[0]
-    bias = lin_reg.intercept_
+    k_log = log_reg.coef_.flatten()
+    b_log = log_reg.intercept_
+
+    k_lin = lin_reg.coef_.flatten()
+    b_lin = lin_reg.intercept_
+
+    kde0 = scipy.stats.gaussian_kde(ldf[feature][ly == 0])
+    kde1 = scipy.stats.gaussian_kde(ldf[feature][ly == 1])
+    kde_X = np.linspace(lX.min(), lX.max(), 100)
+
+    lin_reg_v = np.log(1 / log_threshold - 1)
+    x_log_decision = ((lin_reg_v + b_log) / -k_log)[0]
     
-    points = np.hstack((lX, ly.reshape(-1, 1)))
-    x_proj, y_proj = project_points(points, beta, bias)
+    log_prediction = log_reg.predict_proba(lX)[:, 1]
+    lin_prediction = lin_reg.predict(lX.reshape(-1, 1))
+    rx, ry = decision_roc_point(log_prediction, ly, log_threshold)
+
+    plotter.set_position(idx=0)
     
-    y_plot = lin_reg.predict(X_plot.reshape(-1, 1))
-    
-    plotter.set_position(idx=i * ncols)
+    eps = 1e-2
+    x_max = (np.log(1 / eps - 1) + b_log) / k_log
+    x_min = -x_max
+    X_sigmoid = np.linspace(x_min, x_max, 100)
+    Y_sigmoid = log_reg.predict_proba(X_sigmoid.reshape(-1, 1))[:, 1]
+
+    X_linear = np.array([-b_lin / k_lin, (1 - b_lin) / k_lin])
+    Y_linear = lin_reg.predict(X_linear.reshape(-1, 1))
+
+    plotter.axhline(y=log_threshold, color="red", linestyle="--", alpha=0.7, label=f"Threshold={float(log_threshold):.6f}")
+    plotter.axvline(x=x_log_decision, color="#f58c0c", linestyle="--", alpha=0.7, label=f"Threshold X={float(x_log_decision):.6f}")
+    plotter.plot(X_sigmoid, Y_sigmoid, c="b", alpha=0.7, label="Logistic Regression")
+    plotter.plot(X_linear, Y_linear, color="#126662", alpha=0.7, label="Linear Regression")
     plotter.scatter(
-        lX,
-        ly,
-        c=ldf["target"],
+        lX.flatten(),
+        log_reg.predict_proba(lX.reshape(-1, 1))[:, 1],
+        c=ly,
+        s=20,
+        marker="*",
         cmap="RdYlGn",
+    )
+    plotter.scatter(
+        lX[class0_mask],
+        ly[class0_mask],
+        c="red",
         edgecolor=EDGECOLOR,
         alpha=0.6,
-        label="Data"
+        label="Class 0"
     )
     plotter.scatter(
-        x_proj,
-        y_proj,
-        color="blue",
+        lX[class1_mask],
+        ly[class1_mask],
+        c="green",
+        edgecolor=EDGECOLOR,
         alpha=0.6,
+        label="Class 1"
     )
-    plotter.plot(X_plot, y_plot, c="b", label="Linear Regression")
     plotter.labels(feature, "class", f"{dataset}")
     plotter.grid(True, alpha=0.3)
     plotter.legend()
     
-    X_proj = lX.flatten()
-    sorter = np.argsort(X_proj)
-    X_proj = X_proj[sorter]
-    y_proj = lin_reg.predict(X_proj.reshape(-1, 1))
-    y_sigmoid = sigmoid(X_proj)
-    
-    plotter.set_position(idx=i * ncols + 1)
-    plotter.scatter(
-        lX,
-        ly,
-        c=ldf["target"],
-        cmap="RdYlGn",
-        edgecolor=EDGECOLOR,
-        alpha=0.6,
-        label="Data"
-    )
-    plotter.plot([lX.min(), lX.max()], [0.5] * 2, color="red", alpha=0.8, label="Standart threshold")
-    plotter.plot(X_proj, y_sigmoid, c="b", label="Logistic Regression")
-    plotter.labels("linreg", "class", f"{dataset}")
+
+    o_fpr, o_tpr, o_auc, m_fpr, l_auc, l_tpr, u_auc, u_tpr, m_tpr, m_auc = calc_aucroc_with_ci(ly, log_prediction)
+
+    plotter.set_position(idx=1)
+
+    plotter.plot(o_fpr, o_tpr, color="green", alpha=0.7, label=f"origin ROC curve ({o_auc:.4f})")
+    plotter.plot(m_fpr, m_tpr, color="blue", alpha=0.7, label=f"mean ROC curve {m_auc:.4f}")
+    plotter.fill_between(m_fpr, l_tpr, u_tpr, color="#25eab6", alpha=0.3, label=f"CI{int(confidence_level * 100)}%\nmin_auc={l_auc:.4f}\nmax_auc={u_auc:.4f}")
+    plotter.plot([0, 1], [0, 1], color="red", linestyle="--", alpha=0.6, label="Baseline")
+    plotter.scatter([rx], [ry], color="red", s=30, label=f"Classification point for threshold {log_threshold:.2f}")
     plotter.grid(True, alpha=0.3)
     plotter.legend()
 
-plotter.tight_layout()
-plotter.save(f"{SAVE_DIR}/linreg.png")
+    plotter.set_position(idx=2)
+    
+    o_fpr, o_tpr, o_auc, m_fpr, l_auc, l_tpr, u_auc, u_tpr, m_tpr, m_auc = calc_aucroc_with_ci(ly, lin_prediction)
+
+    plotter.plot(o_fpr, o_tpr, color="green", alpha=0.7, label=f"origin ROC curve ({o_auc:.4f})")
+    plotter.plot(m_fpr, m_tpr, color="blue", alpha=0.7, label=f"mean ROC curve {m_auc:.4f}")
+    plotter.fill_between(m_fpr, l_tpr, u_tpr, color="#25eab6", alpha=0.3, label=f"CI{int(confidence_level * 100)}%\nmin_auc={l_auc:.4f}\nmax_auc={u_auc:.4f}")
+    plotter.plot([0, 1], [0, 1], color="red", linestyle="--", alpha=0.6, label="Baseline")
+    plotter.grid(True, alpha=0.3)
+    plotter.legend()
+
+for i, plotter in enumerate(plotters):
+    plotter.tight_layout()
+    plotter.save(f"{SAVE_DIR}/linreg_{i}.png")
