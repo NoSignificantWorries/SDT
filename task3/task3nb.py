@@ -50,8 +50,8 @@ CALC_T3 = True
 CALC_T4T5 = True
 CALC_T6 = True
 
-
-
+# %% [markdown]
+#  ##### **_Plotter interface_**
 # %%
 class Plotter:
     def __init__(
@@ -198,7 +198,8 @@ class Plotter:
         self.fig.show()
 
 
-
+# %% [markdown]
+#  ##### **_Cache manager_**
 # %%
 class CacheManager:
     def __init__(self, cache_dir: str = "cache"):
@@ -297,7 +298,8 @@ def cached(additional_name: Optional[str] = None):
     return decorator
 
 
-
+# %% [markdown]
+#  ##### **_Data statistics_**
 # %%
 @cached()
 def data_stats(data1, data2) -> Any:
@@ -329,6 +331,8 @@ def get_cov_matrixes(df, features, classes):
 
 # %% [markdown]
 #  ### **Stage 1 (task 1):** _Calculating data, correlations and visualizations_
+# %% [markdown]
+#  ##### **_Create data_**
 # %%
 np.random.seed(42)
 n_samples = 100
@@ -371,7 +375,8 @@ print(df1["target"].value_counts().sort_index())
 print(df1.describe())
 
 
-
+# %% [markdown]
+#  ##### **_Calc correlations_**
 # %%
 if CALC_COV:
     cov_matrixes = get_cov_matrixes(df1, COLUMNS, [0, 1, 2])
@@ -464,6 +469,8 @@ if CALC_COV:
     print(f"Stats for {groups[3]}")
     all_data[3]
 
+# %% [markdown]
+#  ##### **_Hists_**
 # %%
 X = df1[COLUMNS]
 y = df1["target"]
@@ -492,7 +499,8 @@ plotter.tight_layout()
 plotter.save(f"{SAVE_DIR}/df1_hists.png", dpi=DPI)
 
 
-
+# %% [markdown]
+#  ##### **_Show grid_**
 # %%
 if CALC_GRID:
     plotter = Plotter(nrows=8, ncols=8, figsize=(24, 24))
@@ -508,6 +516,8 @@ if CALC_GRID:
 
 # %% [markdown]
 #  ### **Stage 2 (tasks 2):** _Creating dataframes with emissions_
+# %% [markdown]
+#  ##### **_Calculating logdf's_**
 # %%
 @cached()
 def make_AB(df):
@@ -546,6 +556,9 @@ def filter_data(df, classes, features):
 
 # %% [markdown]
 #  ### **Stage 3 (task 3):** _Linear and Log Regressions for datasets_
+# %% [markdown]
+#  ##### **_Model training and ROC_CI calculations_**
+# %%
 @cached()
 def calc_aucroc_with_ci(y_true, y_pred_proba, n_bootstraps=1000, confidence_level=0.95):
     n_samples = len(y_true)
@@ -594,7 +607,6 @@ def draw_curve(plotter, title, rx, ry, o_fpr, o_tpr, o_auc, m_fpr, l_auc, l_tpr,
     plotter.legend()
     
 
-
 def decision_roc_point(pred, truth, threshold):
     pred_binary = np.where(pred >= threshold, 1, 0)
     
@@ -609,6 +621,8 @@ def decision_roc_point(pred, truth, threshold):
     
     return FPR, TPR
 
+# %% [markdown]
+#  ##### **_Main function for tasks 3, 4, 5_**
 # %%
 def make_models_and_plots(data, classes, feature, threshold=0.5, confidence_level=0.95):
     nrows = 1
@@ -704,6 +718,8 @@ def make_models_and_plots(data, classes, feature, threshold=0.5, confidence_leve
 
 
 
+# %% [markdown]
+#  ##### **_Task 3_**
 # %%
 if CALC_T3:
     classes = [0, 1]
@@ -736,6 +752,9 @@ def create_log_data(old_data, classes, features):
     return logdata
 
 
+# %% [markdown]
+#  ##### **_Task3_**
+# %%
 if CALC_T4T5:
     classes = [0, 1]
     features = COLUMNS[:4]
