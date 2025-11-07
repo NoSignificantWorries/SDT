@@ -1,3 +1,3 @@
 #!/usr/bin/sh
 
-rm -rf ${HOME}/Projects/SDT/task2/cache/*.pkl
+rm -rf ${HOME}/Projects/SDT/task3/cache/*.pkl

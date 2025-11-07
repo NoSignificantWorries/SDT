@@ -1,16 +1,32 @@
-import os
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: hydrogen
+#       format_version: '1.3'
+#       jupytext_version: 1.18.1
+#   kernelspec:
+#     display_name: .venv
+#     language: python
+#     name: python3
+# ---
+
+# %% [markdown]
+#  # **Task3**
+
+# %% [markdown]
+#  ### **Stage 0:** _Importing libs. Adding plotter class and sys functions_
+
+# %%
 import json
 import hashlib
 from pathlib import Path
 
 # import sys
-import time
 import pickle
 from typing import Tuple, Optional, Any, Callable
 from functools import wraps
-from contextlib import contextmanager
-from dataclasses import dataclass
-import random
 
 # data
 import numpy as np
@@ -26,10 +42,9 @@ import tqdm
 import scipy
 from sklearn.datasets import make_blobs
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.metrics import roc_curve, auc, precision_recall_curve
-from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import roc_curve, auc
 
-
+# %%
 DPI = 150
 SAVE_DIR = "res"
 COLORS = ["red", "green", "blue"]
@@ -41,10 +56,19 @@ MY_SMOOTH_CMAP = LinearSegmentedColormap.from_list(
 EDGECOLOR = "#11111b"
 STYLES = ["o", "s", "^"]
 
-CALC_COV = False
-CALC_GRID = False
+CACHED = True
+RECACHE = True
+CLEAR_CACHE = False
+
+CALC_COV = True
+CALC_GRID = True
+
+CALC_T3 = True
+CALC_T4T5 = True
+CALC_T6 = True
 
 
+# %%
 class Plotter:
     def __init__(
         self, nrows: int = 1, ncols: int = 1, figsize: Tuple[int, int] = (6, 6)
@@ -190,6 +214,7 @@ class Plotter:
         self.fig.show()
 
 
+# %%
 class CacheManager:
     def __init__(self, cache_dir: str = "cache"):
         self.cache_dir = Path(cache_dir)
@@ -240,7 +265,10 @@ class CacheManager:
         self._save_metadata()
 
 
+# %%
 cache_manager = CacheManager()
+if CLEAR_CACHE or RECACHE:
+    cache_manager.clear_cache()
 
 
 def cached(additional_name: Optional[str] = None):
@@ -251,20 +279,31 @@ def cached(additional_name: Optional[str] = None):
             current_checksum = cache_manager._generate_checksum(args, kwargs)
             cache_path = cache_manager.get_cache_path(cache_id, additional_name)
             
-            if cache_path.exists() and cache_manager.is_cache_valid(str(cache_path), current_checksum):
-                try:
-                    with open(cache_path, 'rb') as f:
-                        print(f"\033[90m> Loading cached result for {func.__name__}\033[0m")
-                        return pickle.load(f)
-                except (pickle.PickleError, EOFError):
-                    print("\033[90m> Cache file corrupted, recalculating...\033[0m")
-            
-            print(f"\033[90m> Calculating result for {func.__name__}...\033[0m")
-            result = func(*args, **kwargs)
-            
-            with open(cache_path, 'wb') as f:
-                pickle.dump(result, f)
-            cache_manager.update_cache_metadata(str(cache_path), current_checksum)
+            if CACHED and not RECACHE:
+                if cache_path.exists() and cache_manager.is_cache_valid(str(cache_path), current_checksum):
+                    try:
+                        with open(cache_path, 'rb') as f:
+                            print(f"\033[90m> Loading cached result for {func.__name__}\033[0m")
+                            return pickle.load(f)
+                    except (pickle.PickleError, EOFError):
+                        print("\033[90m> Cache file corrupted, recalculating...\033[0m")
+                
+                print(f"\033[90m> Calculating result for {func.__name__}...\033[0m")
+                result = func(*args, **kwargs)
+                
+                with open(cache_path, 'wb') as f:
+                    pickle.dump(result, f)
+                cache_manager.update_cache_metadata(str(cache_path), current_checksum)
+            elif RECACHE and CACHED:
+                print(f"\033[90m> Calculating result for {func.__name__}...\033[0m")
+                result = func(*args, **kwargs)
+
+                with open(cache_path, 'wb') as f:
+                    pickle.dump(result, f)
+                cache_manager.update_cache_metadata(str(cache_path), current_checksum)
+            else:
+                print(f"\033[90m> Calculating result for {func.__name__}...\033[0m")
+                result = func(*args, **kwargs)
             
             return result
         
@@ -272,6 +311,8 @@ def cached(additional_name: Optional[str] = None):
     return decorator
 
 
+# %%
+@cached()
 def data_stats(data1, data2) -> Any:
     Pearson_v, Pearson_pv = scipy.stats.pearsonr(data1, data2)
     spearman_v, spearman_pv = scipy.stats.spearmanr(data1, data2)
@@ -279,6 +320,7 @@ def data_stats(data1, data2) -> Any:
     return np.array([Pearson_v, Pearson_pv, spearman_v, spearman_pv])
 
 
+@cached()
 def get_cov_matrixes(df, features, classes):
     stats = np.zeros((len(features), len(features), (len(classes) + 1) * 4))
 
@@ -298,25 +340,7 @@ def get_cov_matrixes(df, features, classes):
     return stats
 
 
-@dataclass
-class TimerResult:
-    elapsed: float
-    start: float
-    end: float
-
-
-@contextmanager
-def timer():
-    start = time.perf_counter()
-    result = TimerResult(elapsed=0, start=start, end=0)
-
-    yield result
-
-    result.end = time.perf_counter()
-    result.elapsed = result.end - result.start
-
-
-
+# %%
 np.random.seed(42)
 n_samples = 100
 n_features = 8
@@ -357,15 +381,10 @@ print("Количество объектов в каждом классе:")
 print(df1["target"].value_counts().sort_index())
 print(df1.describe())
 
-@cached()
-def get_cov(df):
-    cov_matrixes = get_cov_matrixes(df, COLUMNS, [0, 1, 2])
 
-    return cov_matrixes
-
-
+# %%
 if CALC_COV:
-    cov_matrixes = get_cov(df1)
+    cov_matrixes = get_cov_matrixes(df1, COLUMNS, [0, 1, 2])
 
     plotter = Plotter(nrows=4, ncols=4, figsize=(16, 16))
 
@@ -448,6 +467,7 @@ if CALC_COV:
     all_data[3]
 
 
+# %%
 X = df1[COLUMNS]
 y = df1["target"]
 
@@ -475,6 +495,7 @@ plotter.tight_layout()
 plotter.save(f"{SAVE_DIR}/df1_hists.png", dpi=DPI)
 
 
+# %%
 if CALC_GRID:
     plotter = Plotter(nrows=8, ncols=8, figsize=(24, 24))
 
@@ -486,6 +507,7 @@ if CALC_GRID:
     plotter.save("res/df1_8x8.png", dpi=200)
 
 
+# %%
 @cached()
 def make_AB(df):
     data = {"df": df}
@@ -534,7 +556,7 @@ def calc_aucroc_with_ci(y_true, y_pred_proba, n_bootstraps=1000, confidence_leve
         if len(np.unique(y_true[indices])) < 2:
             continue
             
-        fpr, tpr, levels = roc_curve(y_true[indices], y_pred_proba[indices])
+        fpr, tpr, _ = roc_curve(y_true[indices], y_pred_proba[indices])
         tpr_interp = np.interp(mean_fpr, fpr, tpr)
         tpr_interp[0] = 0.0
         fpr_list.append(mean_fpr)
@@ -554,6 +576,18 @@ def calc_aucroc_with_ci(y_true, y_pred_proba, n_bootstraps=1000, confidence_leve
     return origin_fpr, origin_tpr, origin_auc, mean_fpr, ci_lower, tpr_lower, ci_upper, tpr_upper, mean_tpr, mean_auc
 
 
+def draw_curve(plotter, title, rx, ry, o_fpr, o_tpr, o_auc, m_fpr, l_auc, l_tpr, u_auc, u_tpr, m_tpr, m_auc, confidence_level=0.95, threshold=0.5):
+    plotter.plot(o_fpr, o_tpr, color="green", alpha=0.7, label=f"origin ROC curve ({o_auc:.4f})")
+    plotter.plot(m_fpr, m_tpr, color="blue", alpha=0.7, label=f"mean ROC curve {m_auc:.4f}")
+    plotter.fill_between(m_fpr, l_tpr, u_tpr, color="#25eab6", alpha=0.3, label=f"CI{int(confidence_level * 100)}%\nmin_auc={l_auc:.4f}\nmax_auc={u_auc:.4f}")
+    plotter.plot([0, 1], [0, 1], color="red", linestyle="--", alpha=0.6, label="Baseline")
+    plotter.scatter([rx], [ry], color="red", s=30, label=f"Classification point for threshold {threshold:.2f}")
+    plotter.labels("fpr", "tpr", title)
+    plotter.grid(True, alpha=0.3)
+    plotter.legend()
+    
+
+
 def decision_roc_point(pred, truth, threshold):
     pred_binary = np.where(pred >= threshold, 1, 0)
     
@@ -569,118 +603,200 @@ def decision_roc_point(pred, truth, threshold):
     return FPR, TPR
 
 
+# %%
 data = make_AB(df1)
 
-feature = COLUMNS[2]
-classes = [0, 1]
 
-nrows = 1
-ncols = 3
+# %%
+def make_models_and_plots(data, classes, feature, threshold=0.5, confidence_level=0.95):
+    nrows = 1
+    ncols = 2
 
-log_threshold = 0.5
-confidence_level = 0.95
+    plotters = [Plotter(nrows=nrows, ncols=ncols, figsize=(18, 8)) for _ in range(len(data.keys()))]
 
-plotters = [Plotter(nrows=nrows, ncols=ncols, figsize=(22, 8)) for _ in range(len(data.keys()))]
+    for i, dataset in enumerate(data.keys()):
+        plotter = plotters[i]
 
-for i, dataset in enumerate(data.keys()):
-    plotter = plotters[i]
+        _, lX, ly = filter_data(data[dataset], classes, [feature])
 
-    ldf, lX, ly = filter_data(data[dataset], classes, [feature])
+        class0_mask = ly == 0
+        class1_mask = ly == 1
 
-    class0_mask = ly == 0
-    class1_mask = ly == 1
+        lin_reg = LinearRegression()
+        lin_reg.fit(lX.reshape(-1, 1), ly)
+        log_reg = LogisticRegression()
+        log_reg.fit(lX, ly)
+        
+        k_log = log_reg.coef_.flatten()
+        b_log = log_reg.intercept_
+
+        k_lin = lin_reg.coef_.flatten()
+        b_lin = lin_reg.intercept_
+
+        lin_reg_v = np.log(1 / threshold - 1)
+        x_log_decision = ((lin_reg_v + b_log) / -k_log)[0]
+        
+        log_prediction = log_reg.predict_proba(lX)[:, 1]
+        # lin_prediction = lin_reg.predict(lX.reshape(-1, 1))
+
+        plotter.set_position(idx=0)
+        
+        X_sigmoid = np.linspace(lX.min(), lX.max(), 100)
+        Y_sigmoid = log_reg.predict_proba(X_sigmoid.reshape(-1, 1))[:, 1]
+
+        X_linear = np.array([-b_lin / k_lin, (1 - b_lin) / k_lin])
+        Y_linear = lin_reg.predict(X_linear.reshape(-1, 1))
+
+        plotter.axhline(y=threshold, color="red", linestyle="--", alpha=0.7, label=f"Threshold={float(threshold):.6f}")
+        plotter.axvline(x=x_log_decision, color="#f58c0c", linestyle="--", alpha=0.7, label=f"Threshold X={float(x_log_decision):.6f}")
+        plotter.plot(X_sigmoid, Y_sigmoid, c="b", alpha=0.7, label="Logistic Regression")
+        plotter.plot(X_linear, Y_linear, color="#126662", alpha=0.7, label="Linear Regression")
+        plotter.scatter(
+            lX.flatten(),
+            log_reg.predict_proba(lX.reshape(-1, 1))[:, 1],
+            c=ly,
+            s=20,
+            marker="*",
+            cmap="RdYlGn",
+        )
+        plotter.scatter(
+            lX[class0_mask],
+            ly[class0_mask],
+            c="red",
+            edgecolor=EDGECOLOR,
+            alpha=0.6,
+            label="Class 0"
+        )
+        plotter.scatter(
+            lX[class1_mask],
+            ly[class1_mask],
+            c="green",
+            edgecolor=EDGECOLOR,
+            alpha=0.6,
+            label="Class 1"
+        )
+        plotter.labels(feature, "class", f"{dataset}")
+        plotter.grid(True, alpha=0.3)
+        plotter.legend()
+        
+
+        plotter.set_position(idx=1)
+        
+        rx, ry = decision_roc_point(log_prediction, ly, threshold)
+        draw_curve(plotter, "Logistic Regression ROC", rx, ry,
+                   *calc_aucroc_with_ci(ly, log_prediction, confidence_level=confidence_level),
+                   confidence_level=confidence_level,
+                   threshold=threshold)
+
+        '''
+        plotter.set_position(idx=2)
+        
+        rx, ry = decision_roc_point(lin_prediction, ly, threshold)
+        draw_curve(plotter, "Linear Regression ROC", rx, ry, 
+                   *calc_aucroc_with_ci(ly, lin_prediction, confidence_level=confidence_level),
+                   confidence_level=confidence_level,
+                   threshold=threshold)
+        '''
     
-    X_plot = np.linspace(lX.min(), lX.max(), 100)
+    return plotters
 
-    lin_reg = LinearRegression()
-    lin_reg.fit(lX.reshape(-1, 1), ly)
-    log_reg = LogisticRegression()
-    log_reg.fit(lX, ly)
-    
-    k_log = log_reg.coef_.flatten()
-    b_log = log_reg.intercept_
 
-    k_lin = lin_reg.coef_.flatten()
-    b_lin = lin_reg.intercept_
+# %%
+if CALC_T3:
+    classes = [0, 1]
+    feature = COLUMNS[3]
 
-    kde0 = scipy.stats.gaussian_kde(ldf[feature][ly == 0])
-    kde1 = scipy.stats.gaussian_kde(ldf[feature][ly == 1])
-    kde_X = np.linspace(lX.min(), lX.max(), 100)
+    plotters = make_models_and_plots(data, classes, feature)
 
-    lin_reg_v = np.log(1 / log_threshold - 1)
-    x_log_decision = ((lin_reg_v + b_log) / -k_log)[0]
-    
-    log_prediction = log_reg.predict_proba(lX)[:, 1]
-    lin_prediction = lin_reg.predict(lX.reshape(-1, 1))
-    rx, ry = decision_roc_point(log_prediction, ly, log_threshold)
-
-    plotter.set_position(idx=0)
-    
-    eps = 1e-2
-    x_max = (np.log(1 / eps - 1) + b_log) / k_log
-    x_min = -x_max
-    X_sigmoid = np.linspace(x_min, x_max, 100)
-    Y_sigmoid = log_reg.predict_proba(X_sigmoid.reshape(-1, 1))[:, 1]
-
-    X_linear = np.array([-b_lin / k_lin, (1 - b_lin) / k_lin])
-    Y_linear = lin_reg.predict(X_linear.reshape(-1, 1))
-
-    plotter.axhline(y=log_threshold, color="red", linestyle="--", alpha=0.7, label=f"Threshold={float(log_threshold):.6f}")
-    plotter.axvline(x=x_log_decision, color="#f58c0c", linestyle="--", alpha=0.7, label=f"Threshold X={float(x_log_decision):.6f}")
-    plotter.plot(X_sigmoid, Y_sigmoid, c="b", alpha=0.7, label="Logistic Regression")
-    plotter.plot(X_linear, Y_linear, color="#126662", alpha=0.7, label="Linear Regression")
-    plotter.scatter(
-        lX.flatten(),
-        log_reg.predict_proba(lX.reshape(-1, 1))[:, 1],
-        c=ly,
-        s=20,
-        marker="*",
-        cmap="RdYlGn",
-    )
-    plotter.scatter(
-        lX[class0_mask],
-        ly[class0_mask],
-        c="red",
-        edgecolor=EDGECOLOR,
-        alpha=0.6,
-        label="Class 0"
-    )
-    plotter.scatter(
-        lX[class1_mask],
-        ly[class1_mask],
-        c="green",
-        edgecolor=EDGECOLOR,
-        alpha=0.6,
-        label="Class 1"
-    )
-    plotter.labels(feature, "class", f"{dataset}")
-    plotter.grid(True, alpha=0.3)
-    plotter.legend()
+    for i, plotter in enumerate(plotters):
+        plotter.tight_layout()
+        plotter.save(f"{SAVE_DIR}/linreg_{i}.png")
     
 
-    o_fpr, o_tpr, o_auc, m_fpr, l_auc, l_tpr, u_auc, u_tpr, m_tpr, m_auc = calc_aucroc_with_ci(ly, log_prediction)
+# %%
+@cached()
+def create_log_data(old_data, classes, features):
+    logdata = {}
 
-    plotter.set_position(idx=1)
-
-    plotter.plot(o_fpr, o_tpr, color="green", alpha=0.7, label=f"origin ROC curve ({o_auc:.4f})")
-    plotter.plot(m_fpr, m_tpr, color="blue", alpha=0.7, label=f"mean ROC curve {m_auc:.4f}")
-    plotter.fill_between(m_fpr, l_tpr, u_tpr, color="#25eab6", alpha=0.3, label=f"CI{int(confidence_level * 100)}%\nmin_auc={l_auc:.4f}\nmax_auc={u_auc:.4f}")
-    plotter.plot([0, 1], [0, 1], color="red", linestyle="--", alpha=0.6, label="Baseline")
-    plotter.scatter([rx], [ry], color="red", s=30, label=f"Classification point for threshold {log_threshold:.2f}")
-    plotter.grid(True, alpha=0.3)
-    plotter.legend()
-
-    plotter.set_position(idx=2)
+    for dataset in old_data.keys():
+        _, lX, ly = filter_data(old_data[dataset], classes, features)
+        
+        lin_reg = LinearRegression()
+        lin_reg.fit(lX, ly)
+        
+        pred = lin_reg.predict(lX)
+        logdata[f"log{dataset}"] = pd.DataFrame({"feature": pred, "target": ly})
     
-    o_fpr, o_tpr, o_auc, m_fpr, l_auc, l_tpr, u_auc, u_tpr, m_tpr, m_auc = calc_aucroc_with_ci(ly, lin_prediction)
+    return logdata
 
-    plotter.plot(o_fpr, o_tpr, color="green", alpha=0.7, label=f"origin ROC curve ({o_auc:.4f})")
-    plotter.plot(m_fpr, m_tpr, color="blue", alpha=0.7, label=f"mean ROC curve {m_auc:.4f}")
-    plotter.fill_between(m_fpr, l_tpr, u_tpr, color="#25eab6", alpha=0.3, label=f"CI{int(confidence_level * 100)}%\nmin_auc={l_auc:.4f}\nmax_auc={u_auc:.4f}")
-    plotter.plot([0, 1], [0, 1], color="red", linestyle="--", alpha=0.6, label="Baseline")
-    plotter.grid(True, alpha=0.3)
-    plotter.legend()
 
-for i, plotter in enumerate(plotters):
+if CALC_T4T5:
+    classes = [0, 1]
+    features = COLUMNS[:4]
+    
+    logdata = create_log_data(data, classes, features)
+
+    classes = [0, 1]
+
+    plotters = make_models_and_plots(logdata, classes, "feature")
+
+    for i, plotter in enumerate(plotters):
+        plotter.tight_layout()
+        plotter.save(f"{SAVE_DIR}/linreg_logdata_{i}.png")
+
+
+# %%
+if CALC_T6:
+    classes = [0, 1]
+    df6 = data["df_10_10"]
+    probability_levels = [0, 0.2, 0.4, 0.5, 0.6, 0.8, 1.0]
+    threshold = 0.5
+
+    plotter = Plotter(nrows=8, ncols=8, figsize=(24, 24))
+
+    for i, feature_y in enumerate(COLUMNS):
+        for j, feature_x in enumerate(COLUMNS):
+
+            ldf, lX, ly = filter_data(df6, classes, [feature_x, feature_y])
+            class0_mask = ly == 0
+            class1_mask = ly == 1
+            
+            log_reg = LogisticRegression()
+            log_reg.fit(lX, ly)
+            lin_reg = LinearRegression()
+            lin_reg.fit(lX, ly)
+            
+            a, b = lin_reg.coef_
+            c = lin_reg.intercept_
+
+            k = -a / b
+            b = (threshold - c) / b
+            
+            x1_min, x1_max = lX[:, 0].min() - 0.5, lX[:, 0].max() + 0.5
+            x2_min, x2_max = lX[:, 1].min() - 0.5, lX[:, 1].max() + 0.5
+            xp = np.linspace(x1_min, x1_max, 100)
+            xx1, xx2 = np.meshgrid(xp, np.linspace(x2_min, x2_max, 100))
+            
+            yp = k * xp + b
+            
+            filter = (yp >= x2_min) & (yp <= x2_max)
+            yp = yp[filter]
+            xp = xp[filter]
+
+            Z = log_reg.predict_proba(np.c_[xx1.ravel(), xx2.ravel()])[:, 1]
+            Z = Z.reshape(xx1.shape)
+            
+            plotter.set_position(irow=i, icol=j)
+            
+            plotter.contourf(xx1, xx2, Z, alpha=0.3, cmap="RdYlGn")
+            plotter.scatter(lX[:, 0][class0_mask], lX[:, 1][class0_mask], c="red", alpha=0.6, edgecolor=EDGECOLOR, label="Class 0")
+            plotter.scatter(lX[:, 0][class1_mask], lX[:, 1][class1_mask], c="green", alpha=0.6, edgecolor=EDGECOLOR, label="Class 1")
+            contour = plotter.contour(xx1, xx2, Z, levels=probability_levels, colors="black", linewidths=1)
+            plotter.clabel(contour, inline=True, fontsize=8, fmt='%.1f')
+            plotter.plot(xp, yp, color="red", linewidth=2, linestyle="--", label="Linreg")
+            plotter.grid(True, alpha=0.3)
+            plotter.labels(feature_x, feature_y, "")
+            plotter.legend()
+
     plotter.tight_layout()
-    plotter.save(f"{SAVE_DIR}/linreg_{i}.png")
+    plotter.save(f"{SAVE_DIR}/linreg_8x8.png")
