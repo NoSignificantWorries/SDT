@@ -829,5 +829,3 @@ if CALC_T6:
     plotter.tight_layout()
     plotter.save(f"{SAVE_DIR}/linreg_8x8.png")
 
-
-

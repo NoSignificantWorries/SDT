@@ -804,7 +804,7 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
         alpha=0.4,
         edgecolors=EDGECOLOR,
         s=30,
-        label="Objects"
+        label="Objects",
     )
 
     plotter.plot(
@@ -862,8 +862,10 @@ def draw_model(plotter, idx, size, model, X, y, centers_info, labels, scatter_ma
 
     plotter.set_position(idx=idx + 1)
 
-    plotter.pcolormesh(xx, yy, Z_proba, cmap='rainbow', vmin=0.0, vmax=1.0, zorder=0.0)
-    plotter.contour(xx, yy, Z_proba, [0.5], linewidths=2.0, colors='red', label="Decision curve")
+    plotter.pcolormesh(xx, yy, Z_proba, cmap="rainbow", vmin=0.0, vmax=1.0, zorder=0.0)
+    plotter.contour(
+        xx, yy, Z_proba, [0.5], linewidths=2.0, colors="red", label="Decision curve"
+    )
 
     plotter.labels(*labels[:-1], "Predict proba")
 
@@ -962,7 +964,12 @@ def make_stats_for_model(
             roc_pr_stat["precision_area"],
             confidence_level,
             "PR",
-            ("recall", "precision", f"PR-curve for {dataset}", f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}"),
+            (
+                "recall",
+                "precision",
+                f"PR-curve for {dataset}",
+                f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}",
+            ),
             ([0, 1], [pr_baseline] * 2),
         )
 
@@ -1109,7 +1116,12 @@ for i, current_n_features in enumerate([2, 4, 8, 16]):
         roc_pr_stat["precision_area"],
         confidence_level,
         "PR",
-        ("recall", "precision", f"PR-curve for {current_n_features} features", f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}"),
+        (
+            "recall",
+            "precision",
+            f"PR-curve for {current_n_features} features",
+            f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}",
+        ),
         ([0, 1], [pr_baseline] * 2),
     )
 
@@ -1190,12 +1202,12 @@ for i, k in enumerate(k_folds):
 
     precision_upper = np.minimum(
         mean_precision
-            + scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision,
+        + scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision,
         1,
     )
     precision_lower = np.maximum(
         mean_precision
-            - scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision,
+        - scipy.stats.norm.ppf((1 + confidence_level) / 2) * std_precision,
         0,
     )
 
@@ -1235,7 +1247,7 @@ for i, k in enumerate(k_folds):
         [pr_baseline] * 2,
         color="red",
         linestyle="--",
-        label=f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}"
+        label=f"Baseline: {cnts[1]} over {sum(cnts)} = {pr_baseline:.6f}",
     )
     plotter.fill_between(
         mean_recall,
