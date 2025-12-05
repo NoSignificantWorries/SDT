@@ -29,6 +29,7 @@ import matplotlib.axes as mpl_axes
 import scipy
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 # from sklearn.datasets import make_blobs
 # from sklearn.linear_model import LinearRegression, LogisticRegression
 # from sklearn.metrics import roc_curve, auc
@@ -51,9 +52,9 @@ RECACHE = False
 CLEAR_CACHE = False
 
 SHOW_CORRELATIONS = True
-SHOW_HISTS = True
-SHOW_GRID = True
-SHOW_METHODS = True
+SHOW_HISTS = False
+SHOW_GRID = False
+SHOW_METHODS = False
 
 # %% [markdown]
 #  ##### **_Plotter interface_**
@@ -201,22 +202,25 @@ class Plotter:
         self.set_xticks(range(1, len(explained_var) + 1))
         self.grid(True, alpha=0.3)
 
-    def components_projection(self, pca, pca_df, title, pca_columns, columns):
+    def components_projection(self, pca, pca_df, title, pca_columns, columns, colors=COLORS, styles=STYLES):
         loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
 
         for i, row_pca in enumerate(pca_columns):
             for j, col_pca in enumerate(pca_columns):
                 self.set_position(irow=i, icol=j)
                 
-                self.scatter(pca_df.iloc[:, i], pca_df.iloc[:, j], color="green", alpha=0.5, s=20, label='Objects')
+                for cls in pca_df["target"].unique():
+                    cls_mask = pca_df["target"] == cls
+                    self.scatter(pca_df[cls_mask][row_pca], pca_df[cls_mask][col_pca], color=colors[cls], marker=styles[cls], alpha=0.5, s=20, label=f'Class {cls}')
                 
                 for var_idx in range(loadings.shape[0]):
-                    self.arrow(0, 0, loadings[var_idx, i], loadings[var_idx, j], fc='r', ec='r', alpha=0.5)
+                    self.arrow(0, 0, loadings[var_idx, i], loadings[var_idx, j], lw=1.5, head_width=0.03, fc='k', ec='k', alpha=0.5, length_includes_head=True)
                     self.text(loadings[var_idx, i] * 1.15, loadings[var_idx, j] * 1.15,
-                           f'{columns[var_idx]}', color='r', ha='center', va='center')
+                           f'{columns[var_idx]}', color='k', ha='center', va='center')
                 
                 self.set_xlabel(f'{row_pca} (Var: {pca.explained_variance_ratio_[i]:.2%})')
                 self.set_ylabel(f'{col_pca} (Var: {pca.explained_variance_ratio_[j]:.2%})')
+                self.legend()
                 self.grid(True, alpha=0.3)
                 self.axhline(y=0, color='k', linestyle='--', alpha=0.3)
                 self.axvline(x=0, color='k', linestyle='--', alpha=0.3)
@@ -234,8 +238,7 @@ class Plotter:
                 self.add_patch(circle)
                 
                 for var_idx in range(loadings.shape[0]):
-                    self.arrow(0, 0, loadings[var_idx, i], loadings[var_idx, j],
-                            head_width=0.05, head_length=0.05, fc='k', ec='k', alpha=0.7)
+                    self.arrow(0, 0, loadings[var_idx, i], loadings[var_idx, j], fc='k', ec='k', alpha=0.7)
                     
                     self.text(loadings[var_idx, i] * 1.15, loadings[var_idx, j] * 1.15,
                            f'{columns[var_idx]}' if columns else f'V{var_idx + 1}',
@@ -522,6 +525,8 @@ def calc_out(base_df):
 
         df_out.append(local_df)
 
+    return df_out
+
 
 df_out = calc_out(df)
 
@@ -534,13 +539,13 @@ plotter.save(f"{SAVE_DIR}/df_out_5x5.png", dpi=200)
 
 
 # %%
-@cached()
-def make_pca_plots(ldf, name, pca, scaler):
-    data_scaled = scaler.fit_transform(ldf[COLUMNS])
+def make_pca_plots(ldf, name, pca, scaler, columns):
+    data_scaled = scaler.fit_transform(ldf[columns])
     pca_df = pca.fit_transform(data_scaled)
     PCA_COLUMNS = [f'PC{i + 1}' for i in range(pca_df.shape[1])]
+    components = len(PCA_COLUMNS)
     pca_df = pd.DataFrame(pca_df, columns=PCA_COLUMNS)
-    pca_df["target"] = 0
+    pca_df["target"] = ldf["target"]
 
     plotter = Plotter(1, 1, figsize=(10, 10))
     plotter.set_position(idx=0)
@@ -548,18 +553,18 @@ def make_pca_plots(ldf, name, pca, scaler):
     plotter.tight_layout()
     plotter.save(f"{SAVE_DIR}/scree_{name}.png")
 
-    plotter = Plotter(5, 5, figsize=(20, 20))
+    plotter = Plotter(components, components, figsize=(20, 20))
     plotter.dataset_visual(pca_df[PCA_COLUMNS], pca_df["target"], COLORS, STYLES, EDGECOLOR)
     plotter.tight_layout()
     plotter.save(f"{SAVE_DIR}/pca_without_vectors_for_{name}.png", dpi=200)
 
-    plotter = Plotter(5, 5, figsize=(20, 20))
-    plotter.components_projection(pca, pca_df, name, PCA_COLUMNS, COLUMNS)
+    plotter = Plotter(components, components, figsize=(20, 20))
+    plotter.components_projection(pca, pca_df, name, PCA_COLUMNS, columns)
     plotter.tight_layout()
     plotter.save(f"{SAVE_DIR}/pca_with_vectors_for_{name}.png", dpi=200)
 
-    plotter = Plotter(5, 5, figsize=(20, 20))
-    plotter.old_and_new_correlation(pca, name, PCA_COLUMNS, COLUMNS)
+    plotter = Plotter(components, components, figsize=(20, 20))
+    plotter.old_and_new_correlation(pca, name, PCA_COLUMNS, columns)
     plotter.tight_layout()
     plotter.save(f"{SAVE_DIR}/pca_with_old_obj_for_{name}.png", dpi=200)
 
@@ -569,15 +574,15 @@ def make_pca_plots(ldf, name, pca, scaler):
 pca = PCA()
 scaler = StandardScaler()
 
-pca_df = make_pca_plots(df, "df", pca, scaler)
+pca_df = make_pca_plots(df, "df", pca, scaler, COLUMNS)
 # %%
-pca_out_1_df = make_pca_plots(df_out[0], "df_out_1", pca, scaler)
+pca_out_1_df = make_pca_plots(df_out[0], "df_out_1", pca, scaler, COLUMNS)
 # %%
-pca_out_2_df = make_pca_plots(df_out[1], "df_out_2", pca, scaler)
+pca_out_2_df = make_pca_plots(df_out[1], "df_out_2", pca, scaler, COLUMNS)
 # %%
-pca_out_5_df = make_pca_plots(df_out[2], "df_out_5", pca, scaler)
+pca_out_5_df = make_pca_plots(df_out[2], "df_out_5", pca, scaler, COLUMNS)
 # %%
-pca_out_10_df = make_pca_plots(df_out[3], "df_out_10", pca, scaler)
+pca_out_10_df = make_pca_plots(df_out[3], "df_out_10", pca, scaler, COLUMNS)
 
 # %%
 
@@ -590,8 +595,7 @@ def make_methods(n_components):
                 n_neighbors=min(15, pca_df.shape[0] // 10),
                 min_dist=0.1,
                 metric='euclidean'
-            ).fit_transform(pca_df),
-            'color': 'blue'
+            ).fit_transform(pca_df)
         },
         'PaCMAP': {
             'func': lambda seed, pca_df: pacmap.PaCMAP(
@@ -600,8 +604,7 @@ def make_methods(n_components):
                 n_neighbors=None,
                 MN_ratio=0.5,
                 FP_ratio=2.0
-            ).fit_transform(pca_df),
-            'color': 'green'
+            ).fit_transform(pca_df)
         },
         't-SNE': {
             'func': lambda seed, pca_df: TSNE(
@@ -610,11 +613,12 @@ def make_methods(n_components):
                 perplexity=min(30, pca_df.shape[0] // 10),
                 max_iter=1000,
                 init='random'
-            ).fit_transform(pca_df),
-            'color': 'red'
+            ).fit_transform(pca_df)
         }
     }
 # %%
+PROJ_COLUMNS = ["C1", "C2"]
+
 @cached()
 def calc_projections(seeds, methods, df, pca_df):
     PCA_COLUMNS = pca_df.columns[:-1]
@@ -623,20 +627,30 @@ def calc_projections(seeds, methods, df, pca_df):
         res[name] = {}
         for j, seed in enumerate(seeds):
             projections = methods[name]["func"](seed, df[COLUMNS])
-            res[name][f"with seed {j}"] = projections
+            proj_df = pd.DataFrame(projections, columns=PROJ_COLUMNS)
+            proj_df["target"] = df["target"]
+            res[name][f"with seed {j}"] = proj_df
         projections_pca = methods[name]["func"](seed, pca_df[PCA_COLUMNS])
-        res[name]["after PCA"] = projections_pca
+        proj_df = pd.DataFrame(projections_pca, columns=PROJ_COLUMNS)
+        proj_df["target"] = pca_df["target"]
+        res[name]["after PCA"] = proj_df
+
+    return res
 
 
-def show_projections(proj, df_name):
+def show_projections(proj, df_name, colors=COLORS, styles=STYLES):
     plotter = Plotter(3, 5, figsize=(22, 15))
 
     for i, name in enumerate(proj.keys()):
         for j, add_title in enumerate(proj[name].keys()):
             plotter.set_position(irow=i, icol=j)
-            plotter.scatter(proj[name][add_title][..., 0], proj[name][add_title][..., 1], color=COLORS[i], marker=STYLES[i], alpha=0.5)
+
+            lproj = proj[name][add_title]
+            for cls in lproj["target"].unique():
+                plotter.scatter(lproj[PROJ_COLUMNS[0]], lproj[PROJ_COLUMNS[1]], color=colors[cls], marker=styles[cls], alpha=0.5, label=f"Class {cls}")
             plotter.grid(True, alpha=0.3)
             plotter.labels("C1", "C2", f"{name} for {df_name} {add_title}")
+            plotter.legend()
 
     plotter.tight_layout()
     plotter.save(f"{SAVE_DIR}/UMAP_PacMAP_t-SNE_for_{df_name}.png", dpi=DPI)
@@ -645,7 +659,12 @@ def show_projections(proj, df_name):
 
 
 n_random_starts = 4
-random_seeds = np.random.randint(0, 10000, n_random_starts)
+
+@cached()
+def get_random_seeds(n_random):
+    return np.random.randint(0, 10000, n_random)
+
+random_seeds = get_random_seeds(n_random_starts)
 
 methods = make_methods(2)
 
@@ -656,18 +675,100 @@ if SHOW_METHODS:
 # %%
 if SHOW_METHODS:
     proj_df_out_1 = calc_projections(random_seeds, methods, df_out[0], pca_out_1_df)
-    show_projections(proj_df_out_1, "df")
+    show_projections(proj_df_out_1, "df_out_1")
 # %%
 if SHOW_METHODS:
     proj_df_out_2 = calc_projections(random_seeds, methods, df_out[1], pca_out_2_df)
-    show_projections(proj_df_out_2, "df")
+    show_projections(proj_df_out_2, "df_out_2")
 # %%
 if SHOW_METHODS:
     proj_df_out_5 = calc_projections(random_seeds, methods, df_out[2], pca_out_5_df)
-    show_projections(proj_df_out_5, "df")
+    show_projections(proj_df_out_5, "df_out_5")
 # %%
 if SHOW_METHODS:
     proj_df_out_10 = calc_projections(random_seeds, methods, df_out[3], pca_out_10_df)
-    show_projections(proj_df_out_10, "df")
+    show_projections(proj_df_out_10, "df_out_10")
+
+# %%
+@cached()
+def generate_dataset_2(A, n, columns):
+    start1 = np.zeros(4)
+    end1   = np.array([A, A, A, A])
+
+    start2 = np.array([A/100, 0, 0, 0])
+    end2   = np.array([A + A/100, A, A, A])
+
+    var   = A / 200000
+    sigma = np.sqrt(var)
+
+    rng = np.random.default_rng(0)
+
+    t1 = rng.random(n)
+    t2 = rng.random(n)
+
+    X1 = start1 + np.outer(t1, end1 - start1) + rng.normal(0, sigma, size=(n, 4))
+    X2 = start2 + np.outer(t2, end2 - start2) + rng.normal(0, sigma, size=(n, 4))
+
+    df_LDA = pd.DataFrame(np.vstack([X1, X2]), columns=columns)
+    df_LDA["target"] = np.array([0] * n + [1] * n)
+
+    return df_LDA
+
+
+COLUMNS2 = [f"axes_{i}" for i in range(4)]
+df_LDA = generate_dataset_2(20, 1000, COLUMNS2)
+
+plotter = Plotter(4, 4, figsize=(16, 16))
+plotter.dataset_visual(df_LDA[COLUMNS2], df_LDA["target"], COLORS, STYLES, EDGECOLOR)
+plotter.tight_layout()
+plotter.save(f"{SAVE_DIR}/df_LDA.png", dpi=DPI)
+
+# %%
+pca = PCA()
+scaler = StandardScaler()
+
+pca_LDA_df = make_pca_plots(df_LDA, "df_LDA", pca, scaler, COLUMNS2)
+
+# %%
+
+plotter = Plotter(4, 4, figsize=(16, 16))
+
+X = df_LDA[COLUMNS2]
+y = df_LDA["target"]
+size = 500
+
+for i, row_name in enumerate(COLUMNS2):
+    for j, col_name in enumerate(COLUMNS2):
+        loc_X = np.array(X[[row_name, col_name]])
+        model = LinearDiscriminantAnalysis()
+        model.fit(loc_X, y)
+
+        x_min, x_max = loc_X[:, 0].min() - 1, loc_X[:, 0].max() + 1
+        y_min, y_max = loc_X[:, 1].min() - 1, loc_X[:, 1].max() + 1
+        xx, yy = np.meshgrid(
+            np.linspace(x_min, x_max, size), np.linspace(y_min, y_max, size)
+        )
+
+        Z = model.predict(np.c_[xx.ravel(), yy.ravel()])
+        Z = Z.reshape(xx.shape)
+
+        plotter.set_position(irow=i, icol=j)
+
+        plotter.contourf(xx, yy, Z, alpha=0.3, cmap="bwr")
+        plotter.scatter(
+            loc_X[:, 0],
+            loc_X[:, 1],
+            c=y,
+            cmap="bwr",
+            alpha=0.4,
+            edgecolors=EDGECOLOR,
+            s=30,
+            label="Objects",
+        )
+        plotter.legend()
+        plotter.labels(row_name, col_name, f"LDA for {row_name} and {col_name}")
+
+plotter.tight_layout()
+plotter.save(f"{SAVE_DIR}/LDA.png", dpi=DPI)
 
 
